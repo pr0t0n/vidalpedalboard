@@ -1,4 +1,3 @@
-import { useState, useCallback } from 'react';
 import { useAudioEngine } from '@/hooks/useAudioEngine';
 import { CompressorPedal } from '@/components/pedals/CompressorPedal';
 import { DrivePedal } from '@/components/pedals/DrivePedal';
@@ -12,8 +11,6 @@ import { Metronome } from '@/components/Metronome';
 import { VolumeMaster } from '@/components/VolumeMaster';
 import { VidalLogo, VidalFooter } from '@/components/VidalLogo';
 import { HeaderTuner } from '@/components/HeaderTuner';
-import { PresetSelector } from '@/components/PresetSelector';
-import { Preset } from '@/lib/presets';
 import { AlertCircle, Mic, MicOff, Cpu, HardDrive, Clock, Volume2 } from 'lucide-react';
 
 const Index = () => {
@@ -31,17 +28,7 @@ const Index = () => {
     togglePedal,
     updateParam,
     setVolume,
-    applyPreset,
   } = useAudioEngine();
-
-  const [currentPresetId, setCurrentPresetId] = useState<string | undefined>();
-
-  const handleSelectPreset = useCallback((preset: Preset) => {
-    setCurrentPresetId(preset.id);
-    
-    // Apply preset using the hook function
-    applyPreset(preset.pedalState || {}, preset.params || {});
-  }, [applyPreset]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-muted/30 flex flex-col">
@@ -158,35 +145,27 @@ const Index = () => {
 
       {/* Main Content */}
       <main className="flex-1 p-4 max-w-7xl mx-auto w-full">
-        {/* Preset Selector */}
-        <div className="mb-4 flex items-center gap-4">
-          <PresetSelector 
-            onSelectPreset={handleSelectPreset} 
-            currentPresetId={currentPresetId} 
-          />
-          
-          {/* Signal Chain Flow */}
-          <div className="flex-1 flex items-center justify-center gap-2 text-xs font-mono text-muted-foreground flex-wrap">
-            <span>GUITAR</span>
-            <span>→</span>
-            <span className={pedalState.compressor ? 'text-[hsl(var(--pedal-compressor))]' : ''}>COMP</span>
-            <span>→</span>
-            <span className={pedalState.drive ? 'text-[hsl(var(--pedal-drive))]' : ''}>DRIVE</span>
-            <span>→</span>
-            <span className={pedalState.distortion ? 'text-[hsl(var(--pedal-distortion))]' : ''}>DIST</span>
-            <span>→</span>
-            <span className={pedalState.chorus ? 'text-[hsl(var(--pedal-chorus))]' : ''}>CHORUS</span>
-            <span>→</span>
-            <span className={pedalState.tremolo ? 'text-[hsl(var(--pedal-tremolo))]' : ''}>TREM</span>
-            <span>→</span>
-            <span className={pedalState.delay ? 'text-[hsl(var(--pedal-delay))]' : ''}>DELAY</span>
-            <span>→</span>
-            <span className={pedalState.wah ? 'text-[hsl(var(--pedal-wah))]' : ''}>WAH</span>
-            <span>→</span>
-            <span className={pedalState.reverb ? 'text-[hsl(var(--pedal-reverb))]' : ''}>REVERB</span>
-            <span>→</span>
-            <span>AMP</span>
-          </div>
+        {/* Signal Chain Flow */}
+        <div className="mb-4 flex items-center justify-center gap-2 text-xs font-mono text-muted-foreground flex-wrap">
+          <span>GUITAR</span>
+          <span>→</span>
+          <span className={pedalState.compressor ? 'text-[hsl(var(--pedal-compressor))]' : ''}>COMP</span>
+          <span>→</span>
+          <span className={pedalState.drive ? 'text-[hsl(var(--pedal-drive))]' : ''}>DRIVE</span>
+          <span>→</span>
+          <span className={pedalState.distortion ? 'text-[hsl(var(--pedal-distortion))]' : ''}>DIST</span>
+          <span>→</span>
+          <span className={pedalState.chorus ? 'text-[hsl(var(--pedal-chorus))]' : ''}>CHORUS</span>
+          <span>→</span>
+          <span className={pedalState.tremolo ? 'text-[hsl(var(--pedal-tremolo))]' : ''}>TREM</span>
+          <span>→</span>
+          <span className={pedalState.delay ? 'text-[hsl(var(--pedal-delay))]' : ''}>DELAY</span>
+          <span>→</span>
+          <span className={pedalState.wah ? 'text-[hsl(var(--pedal-wah))]' : ''}>WAH</span>
+          <span>→</span>
+          <span className={pedalState.reverb ? 'text-[hsl(var(--pedal-reverb))]' : ''}>REVERB</span>
+          <span>→</span>
+          <span>AMP</span>
         </div>
 
         {/* Pedals Grid */}

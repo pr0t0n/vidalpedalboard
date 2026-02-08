@@ -1,14 +1,14 @@
 export function VidalLogo() {
   return (
     <div className="flex items-center gap-2">
-      {/* Premium Text Logo */}
+      {/* Premium Text Logo - Cyan */}
       <div className="flex items-center">
         <span
           className="text-xl font-black tracking-tight"
           style={{
             fontFamily: "'Inter', sans-serif",
             letterSpacing: '-0.03em',
-            background: 'linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(35, 100%, 60%) 50%, hsl(var(--primary)) 100%)',
+            background: 'linear-gradient(135deg, hsl(185, 100%, 50%) 0%, hsl(195, 100%, 60%) 50%, hsl(180, 100%, 45%) 100%)',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             backgroundClip: 'text',
@@ -22,13 +22,18 @@ export function VidalLogo() {
       <div 
         className="w-px h-5"
         style={{
-          background: 'linear-gradient(180deg, transparent, hsl(var(--primary) / 0.5), transparent)',
+          background: 'linear-gradient(180deg, transparent, hsl(185, 100%, 50% / 0.5), transparent)',
         }}
       />
       
       {/* Product Name */}
       <div className="flex flex-col leading-none">
-        <span className="text-[10px] font-medium tracking-[0.2em] text-muted-foreground uppercase">
+        <span 
+          className="text-[10px] font-medium tracking-[0.2em] uppercase"
+          style={{
+            color: 'hsl(185, 60%, 60%)',
+          }}
+        >
           PEDALBOARD
         </span>
         <span className="text-[8px] font-mono text-muted-foreground/60 tracking-wider">
@@ -45,7 +50,7 @@ export function VidalFooter() {
       <span 
         className="font-semibold"
         style={{
-          background: 'linear-gradient(135deg, hsl(var(--primary)), hsl(35, 100%, 60%))',
+          background: 'linear-gradient(135deg, hsl(185, 100%, 50%), hsl(195, 100%, 60%))',
           WebkitBackgroundClip: 'text',
           WebkitTextFillColor: 'transparent',
           backgroundClip: 'text',

@@ -36,12 +36,14 @@ export function StagePedal({ name, color, isOn, onToggle, params }: StagePedalPr
           boxShadow: isOn ? `0 0 30px ${color}40, inset 0 0 20px ${color}10` : undefined,
         }}
       >
-        {/* LED Indicator */}
+        {/* LED Indicator - Green when ON, Red when OFF */}
         <div
           className="w-4 h-4 rounded-full"
           style={{
-            backgroundColor: isOn ? color : 'hsl(var(--stage-inactive))',
-            boxShadow: isOn ? `0 0 15px ${color}` : undefined,
+            backgroundColor: isOn ? 'hsl(142, 70%, 45%)' : 'hsl(0, 70%, 40%)',
+            boxShadow: isOn 
+              ? '0 0 15px hsl(142, 70%, 45%), 0 0 30px hsl(142, 70%, 45% / 0.5)' 
+              : '0 0 8px hsl(0, 70%, 40% / 0.5)',
           }}
         />
 
