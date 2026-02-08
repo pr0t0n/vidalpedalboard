@@ -1,28 +1,39 @@
-import { Guitar } from 'lucide-react';
-
 export function VidalLogo() {
   return (
-    <div className="flex flex-col items-center gap-1">
-      {/* Main Logo */}
-      <div className="flex items-center gap-3">
-        <div className="relative">
-          <Guitar className="w-8 h-8 text-primary" />
-          <div className="absolute inset-0 blur-md bg-primary/30 -z-10" />
-        </div>
-        <div className="flex flex-col">
-          <span
-            className="text-2xl font-black tracking-tight bg-gradient-to-r from-primary via-orange-400 to-primary bg-clip-text text-transparent"
-            style={{
-              fontFamily: "'Inter', sans-serif",
-              letterSpacing: '-0.02em',
-            }}
-          >
-            VIDAL
-          </span>
-          <span className="text-[10px] text-muted-foreground tracking-[0.3em] uppercase -mt-1">
-            PedalBoard
-          </span>
-        </div>
+    <div className="flex items-center gap-2">
+      {/* Premium Text Logo */}
+      <div className="flex items-center">
+        <span
+          className="text-xl font-black tracking-tight"
+          style={{
+            fontFamily: "'Inter', sans-serif",
+            letterSpacing: '-0.03em',
+            background: 'linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(35, 100%, 60%) 50%, hsl(var(--primary)) 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            backgroundClip: 'text',
+          }}
+        >
+          ANDRÉ VIDAL
+        </span>
+      </div>
+      
+      {/* Divider */}
+      <div 
+        className="w-px h-5"
+        style={{
+          background: 'linear-gradient(180deg, transparent, hsl(var(--primary) / 0.5), transparent)',
+        }}
+      />
+      
+      {/* Product Name */}
+      <div className="flex flex-col leading-none">
+        <span className="text-[10px] font-medium tracking-[0.2em] text-muted-foreground uppercase">
+          PEDALBOARD
+        </span>
+        <span className="text-[8px] font-mono text-muted-foreground/60 tracking-wider">
+          PRO SERIES
+        </span>
       </div>
     </div>
   );
@@ -30,11 +41,20 @@ export function VidalLogo() {
 
 export function VidalFooter() {
   return (
-    <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
-      <span>Desenvolvido por</span>
-      <span className="font-bold text-primary">André Vidal</span>
-      <span>•</span>
-      <span className="font-mono">PedalBoard v1.0</span>
+    <div className="flex items-center justify-center gap-3 text-xs text-muted-foreground py-4">
+      <span 
+        className="font-semibold"
+        style={{
+          background: 'linear-gradient(135deg, hsl(var(--primary)), hsl(35, 100%, 60%))',
+          WebkitBackgroundClip: 'text',
+          WebkitTextFillColor: 'transparent',
+          backgroundClip: 'text',
+        }}
+      >
+        André Vidal
+      </span>
+      <span className="text-muted-foreground/40">•</span>
+      <span className="font-mono text-muted-foreground/60">PedalBoard v1.0</span>
     </div>
   );
 }

@@ -1,5 +1,9 @@
 import { useCallback, useRef, useState, useEffect } from 'react';
 import Tuna from 'tunajs';
+import { usePitchDetection, TunerData } from './usePitchDetection';
+
+// Re-export TunerData for external use
+export type { TunerData } from './usePitchDetection';
 
 export interface PedalState {
   tuner: boolean;
@@ -53,101 +57,13 @@ export interface PedalParams {
   volume: number;
 }
 
-export interface TunerData {
-  frequency: number;
-  note: string;
-  cents: number;
-  octave: number;
-}
-
 export interface PerformanceStats {
   cpu: number;
   memory: number;
   latency: number;
 }
 
-const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-
-function frequencyToNote(frequency: number): TunerData {
-  if (frequency < 20 || frequency > 20000) {
-    return { frequency: 0, note: '-', cents: 0, octave: 0 };
-  }
-  
-  const noteNum = 12 * (Math.log2(frequency / 440)) + 69;
-  const roundedNote = Math.round(noteNum);
-  const cents = Math.round((noteNum - roundedNote) * 100);
-  const note = NOTE_NAMES[((roundedNote % 12) + 12) % 12];
-  const octave = Math.floor(roundedNote / 12) - 1;
-  
-  return { frequency, note, cents, octave };
-}
-
-// Improved pitch detection using YIN algorithm
-function detectPitch(buffer: Float32Array, sampleRate: number): number {
-  const SIZE = buffer.length;
-  
-  // Calculate RMS to check if there's enough signal
-  let rms = 0;
-  for (let i = 0; i < SIZE; i++) {
-    rms += buffer[i] * buffer[i];
-  }
-  rms = Math.sqrt(rms / SIZE);
-  
-  // Threshold for signal detection
-  if (rms < 0.01) return -1;
-  
-  // YIN algorithm implementation
-  const yinBuffer = new Float32Array(SIZE / 2);
-  let probability = 0;
-  let tau = -1;
-  
-  // Step 1: Difference function
-  for (let t = 0; t < SIZE / 2; t++) {
-    yinBuffer[t] = 0;
-    for (let j = 0; j < SIZE / 2; j++) {
-      const delta = buffer[j] - buffer[j + t];
-      yinBuffer[t] += delta * delta;
-    }
-  }
-  
-  // Step 2: Cumulative mean normalized difference
-  yinBuffer[0] = 1;
-  let runningSum = 0;
-  for (let t = 1; t < SIZE / 2; t++) {
-    runningSum += yinBuffer[t];
-    yinBuffer[t] *= t / runningSum;
-  }
-  
-  // Step 3: Absolute threshold
-  const threshold = 0.1;
-  for (let t = 2; t < SIZE / 2; t++) {
-    if (yinBuffer[t] < threshold) {
-      while (t + 1 < SIZE / 2 && yinBuffer[t + 1] < yinBuffer[t]) {
-        t++;
-      }
-      probability = 1 - yinBuffer[t];
-      tau = t;
-      break;
-    }
-  }
-  
-  if (tau === -1 || probability < 0.5) return -1;
-  
-  // Step 4: Parabolic interpolation
-  let betterTau: number;
-  if (tau < 1) {
-    betterTau = tau;
-  } else if (tau >= SIZE / 2 - 1) {
-    betterTau = tau;
-  } else {
-    const s0 = yinBuffer[tau - 1];
-    const s1 = yinBuffer[tau];
-    const s2 = yinBuffer[tau + 1];
-    betterTau = tau + (s2 - s0) / (2 * (2 * s1 - s2 - s0));
-  }
-  
-  return sampleRate / betterTau;
-}
+// Pitch detection is now handled by usePitchDetection hook
 
 // Create distortion curve for waveshaper
 function makeDistortionCurve(amount: number): Float32Array<ArrayBuffer> {
@@ -169,8 +85,14 @@ export function useAudioEngine() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inputLevel, setInputLevel] = useState(0);
-  const [tunerData, setTunerData] = useState<TunerData>({ frequency: 0, note: '-', cents: 0, octave: 0 });
   const [performanceStats, setPerformanceStats] = useState<PerformanceStats>({ cpu: 0, memory: 0, latency: 0 });
+  
+  // Use the dedicated pitch detection hook
+  const { tunerData, setTunerData, detectPitch, reset: resetTuner } = usePitchDetection({
+    algorithm: 'hybrid',
+    clarityThreshold: 0.6,
+    smoothingFactor: 0.85,
+  });
   
   const [pedalState, setPedalState] = useState<PedalState>({
     tuner: false,
@@ -267,14 +189,14 @@ export function useAudioEngine() {
     rms = Math.sqrt(rms / bufferLength);
     setInputLevel(Math.min(1, rms * 5));
     
-    // Tuner detection using dedicated analyser
-    if (pedalState.tuner && tunerAnalyserRef.current) {
+    // Tuner detection using dedicated analyser with new pitch detection hook
+    if (pedalState.tuner && tunerAnalyserRef.current && audioContextRef.current) {
       const tunerBuffer = new Float32Array(tunerAnalyserRef.current.fftSize);
       tunerAnalyserRef.current.getFloatTimeDomainData(tunerBuffer);
       
-      const frequency = detectPitch(tunerBuffer, audioContextRef.current?.sampleRate || 44100);
-      if (frequency > 0 && frequency < 2000) {
-        setTunerData(frequencyToNote(frequency));
+      const detectedNote = detectPitch(tunerBuffer, audioContextRef.current.sampleRate);
+      if (detectedNote.frequency > 0) {
+        setTunerData(detectedNote);
       }
     }
     
@@ -546,7 +468,7 @@ export function useAudioEngine() {
     
     setIsConnected(false);
     setInputLevel(0);
-    setTunerData({ frequency: 0, note: '-', cents: 0, octave: 0 });
+    resetTuner();
     setPerformanceStats({ cpu: 0, memory: 0, latency: 0 });
   }, []);
 
