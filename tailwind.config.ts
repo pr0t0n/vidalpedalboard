@@ -14,7 +14,7 @@ export default {
     },
     extend: {
       fontFamily: {
-        display: ['Orbitron', 'sans-serif'],
+        mono: ['JetBrains Mono', 'monospace'],
         sans: ['Inter', 'sans-serif'],
       },
       colors: {
@@ -51,36 +51,6 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
-        pedal: {
-          tuner: "hsl(var(--pedal-tuner))",
-          "tuner-glow": "hsl(var(--pedal-tuner-glow))",
-          compressor: "hsl(var(--pedal-compressor))",
-          "compressor-glow": "hsl(var(--pedal-compressor-glow))",
-          drive: "hsl(var(--pedal-drive))",
-          "drive-glow": "hsl(var(--pedal-drive-glow))",
-          chorus: "hsl(var(--pedal-chorus))",
-          "chorus-glow": "hsl(var(--pedal-chorus-glow))",
-          tremolo: "hsl(var(--pedal-tremolo))",
-          "tremolo-glow": "hsl(var(--pedal-tremolo-glow))",
-          delay: "hsl(var(--pedal-delay))",
-          "delay-glow": "hsl(var(--pedal-delay-glow))",
-          wah: "hsl(var(--pedal-wah))",
-          "wah-glow": "hsl(var(--pedal-wah-glow))",
-          reverb: "hsl(var(--pedal-reverb))",
-          "reverb-glow": "hsl(var(--pedal-reverb-glow))",
-        },
-        led: {
-          on: "hsl(var(--led-on))",
-          off: "hsl(var(--led-off))",
-          sharp: "hsl(var(--led-tuner-sharp))",
-          flat: "hsl(var(--led-tuner-flat))",
-        },
-        metal: {
-          dark: "hsl(var(--metal-dark))",
-          mid: "hsl(var(--metal-mid))",
-          light: "hsl(var(--metal-light))",
-          highlight: "hsl(var(--metal-highlight))",
-        },
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -89,22 +59,20 @@ export default {
       },
       keyframes: {
         "accordion-down": {
-          from: {
-            height: "0",
-          },
-          to: {
-            height: "var(--radix-accordion-content-height)",
-          },
+          from: { height: "0" },
+          to: { height: "var(--radix-accordion-content-height)" },
         },
         "accordion-up": {
-          from: {
-            height: "var(--radix-accordion-content-height)",
-          },
-          to: {
-            height: "0",
-          },
+          from: { height: "var(--radix-accordion-content-height)" },
+          to: { height: "0" },
         },
       },
+      animation: {
+        "accordion-down": "accordion-down 0.2s ease-out",
+        "accordion-up": "accordion-up 0.2s ease-out",
+      },
+    },
+  },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
