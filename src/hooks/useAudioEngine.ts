@@ -1,9 +1,13 @@
 import { useCallback, useRef, useState, useEffect } from 'react';
 import Tuna from 'tunajs';
-import { usePitchDetection, TunerData } from './usePitchDetection';
 
-// Re-export TunerData for external use
-export type { TunerData } from './usePitchDetection';
+export interface TunerData {
+  frequency: number;
+  note: string;
+  cents: number;
+  octave: number;
+  clarity: number;
+}
 
 export interface PedalState {
   tuner: boolean;
@@ -63,7 +67,97 @@ export interface PerformanceStats {
   latency: number;
 }
 
-// Pitch detection is now handled by usePitchDetection hook
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const A4_FREQUENCY = 440;
+
+function frequencyToNote(frequency: number, clarity: number): TunerData {
+  if (frequency < 20 || frequency > 5000 || !isFinite(frequency)) {
+    return { frequency: 0, note: '-', cents: 0, octave: 0, clarity: 0 };
+  }
+  
+  const semitonesFromA4 = 12 * Math.log2(frequency / A4_FREQUENCY);
+  const roundedSemitones = Math.round(semitonesFromA4);
+  const cents = Math.round((semitonesFromA4 - roundedSemitones) * 100);
+  const midiNote = 69 + roundedSemitones;
+  const note = NOTE_NAMES[((midiNote % 12) + 12) % 12];
+  const octave = Math.floor(midiNote / 12) - 1;
+  
+  return { frequency, note, cents, octave, clarity };
+}
+
+// YIN algorithm for robust pitch detection
+function detectPitchYIN(buffer: Float32Array, sampleRate: number): { frequency: number; clarity: number } {
+  const SIZE = buffer.length;
+  const HALF_SIZE = Math.floor(SIZE / 2);
+  
+  let rms = 0;
+  for (let i = 0; i < SIZE; i++) {
+    rms += buffer[i] * buffer[i];
+  }
+  rms = Math.sqrt(rms / SIZE);
+  
+  if (rms < 0.01) return { frequency: -1, clarity: 0 };
+  
+  const yinBuffer = new Float32Array(HALF_SIZE);
+  yinBuffer[0] = 1;
+  let runningSum = 0;
+  
+  for (let tau = 1; tau < HALF_SIZE; tau++) {
+    let diff = 0;
+    for (let i = 0; i < HALF_SIZE; i++) {
+      const delta = buffer[i] - buffer[i + tau];
+      diff += delta * delta;
+    }
+    runningSum += diff;
+    yinBuffer[tau] = diff * tau / runningSum;
+  }
+  
+  const threshold = 0.1;
+  let tau = 2;
+  
+  while (tau < HALF_SIZE - 1) {
+    if (yinBuffer[tau] < threshold) {
+      while (tau + 1 < HALF_SIZE && yinBuffer[tau + 1] < yinBuffer[tau]) {
+        tau++;
+      }
+      break;
+    }
+    tau++;
+  }
+  
+  if (tau >= HALF_SIZE - 1) {
+    let minVal = Infinity;
+    let minTau = 2;
+    for (let i = 2; i < HALF_SIZE; i++) {
+      if (yinBuffer[i] < minVal) {
+        minVal = yinBuffer[i];
+        minTau = i;
+      }
+    }
+    if (minVal > 0.5) return { frequency: -1, clarity: 0 };
+    tau = minTau;
+  }
+  
+  let betterTau: number;
+  if (tau < 1 || tau >= HALF_SIZE - 1) {
+    betterTau = tau;
+  } else {
+    const s0 = yinBuffer[tau - 1];
+    const s1 = yinBuffer[tau];
+    const s2 = yinBuffer[tau + 1];
+    const denominator = 2 * s1 - s2 - s0;
+    betterTau = Math.abs(denominator) < 1e-10 ? tau : tau + (s2 - s0) / (2 * denominator);
+  }
+  
+  const frequency = sampleRate / betterTau;
+  const clarity = 1 - yinBuffer[tau];
+  
+  if (frequency < 60 || frequency > 1500) {
+    return { frequency: -1, clarity: 0 };
+  }
+  
+  return { frequency, clarity };
+}
 
 // Create distortion curve for waveshaper
 function makeDistortionCurve(amount: number): Float32Array<ArrayBuffer> {
@@ -86,13 +180,11 @@ export function useAudioEngine() {
   const [error, setError] = useState<string | null>(null);
   const [inputLevel, setInputLevel] = useState(0);
   const [performanceStats, setPerformanceStats] = useState<PerformanceStats>({ cpu: 0, memory: 0, latency: 0 });
+  const [tunerData, setTunerData] = useState<TunerData>({ frequency: 0, note: '-', cents: 0, octave: 0, clarity: 0 });
   
-  // Use the dedicated pitch detection hook
-  const { tunerData, setTunerData, detectPitch, reset: resetTuner } = usePitchDetection({
-    algorithm: 'hybrid',
-    clarityThreshold: 0.6,
-    smoothingFactor: 0.85,
-  });
+  // Pitch detection state refs for smoothing
+  const lastFrequencyRef = useRef<number>(0);
+  const frequencyHistoryRef = useRef<number[]>([]);
   
   const [pedalState, setPedalState] = useState<PedalState>({
     tuner: false,
@@ -189,14 +281,37 @@ export function useAudioEngine() {
     rms = Math.sqrt(rms / bufferLength);
     setInputLevel(Math.min(1, rms * 5));
     
-    // Tuner detection using dedicated analyser with new pitch detection hook
+    // Tuner detection using YIN algorithm
     if (pedalState.tuner && tunerAnalyserRef.current && audioContextRef.current) {
       const tunerBuffer = new Float32Array(tunerAnalyserRef.current.fftSize);
       tunerAnalyserRef.current.getFloatTimeDomainData(tunerBuffer);
       
-      const detectedNote = detectPitch(tunerBuffer, audioContextRef.current.sampleRate);
-      if (detectedNote.frequency > 0) {
-        setTunerData(detectedNote);
+      const result = detectPitchYIN(tunerBuffer, audioContextRef.current.sampleRate);
+      if (result.frequency > 0 && result.clarity > 0.6) {
+        // Apply smoothing
+        let smoothedFreq = result.frequency;
+        if (lastFrequencyRef.current > 0) {
+          const diff = Math.abs(result.frequency - lastFrequencyRef.current);
+          const percentDiff = diff / lastFrequencyRef.current;
+          if (percentDiff < 0.1) {
+            smoothedFreq = 0.85 * lastFrequencyRef.current + 0.15 * result.frequency;
+          }
+        }
+        
+        // Update history for median filtering
+        frequencyHistoryRef.current.push(smoothedFreq);
+        if (frequencyHistoryRef.current.length > 5) {
+          frequencyHistoryRef.current.shift();
+        }
+        
+        // Use median for stability
+        if (frequencyHistoryRef.current.length >= 3) {
+          const sorted = [...frequencyHistoryRef.current].sort((a, b) => a - b);
+          smoothedFreq = sorted[Math.floor(sorted.length / 2)];
+        }
+        
+        lastFrequencyRef.current = smoothedFreq;
+        setTunerData(frequencyToNote(smoothedFreq, result.clarity));
       }
     }
     
@@ -468,7 +583,9 @@ export function useAudioEngine() {
     
     setIsConnected(false);
     setInputLevel(0);
-    resetTuner();
+    setTunerData({ frequency: 0, note: '-', cents: 0, octave: 0, clarity: 0 });
+    lastFrequencyRef.current = 0;
+    frequencyHistoryRef.current = [];
     setPerformanceStats({ cpu: 0, memory: 0, latency: 0 });
   }, []);
 

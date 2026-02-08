@@ -1,4 +1,4 @@
-import { TunerData } from '@/hooks/usePitchDetection';
+import { TunerData } from '@/hooks/useAudioEngine';
 
 interface HeaderTunerProps {
   isOn: boolean;
