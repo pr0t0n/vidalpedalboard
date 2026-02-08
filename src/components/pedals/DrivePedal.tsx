@@ -1,5 +1,5 @@
 import { PedalCase } from '@/components/PedalCase';
-import { Knob } from '@/components/Knob';
+import { ParamControl } from '@/components/ParamControl';
 import { PedalParams } from '@/hooks/useAudioEngine';
 
 interface DrivePedalProps {
@@ -20,19 +20,21 @@ export function DrivePedal({ isOn, onToggle, params, onParamChange }: DrivePedal
       onToggle={onToggle}
     >
       <div className="flex gap-4">
-        <Knob
+        <ParamControl
           value={params.gain}
           min={0}
           max={1}
+          step={0.05}
           onChange={(v) => onParamChange('gain', v)}
-          label="Drive"
+          label="Gain"
           color="hsl(var(--pedal-drive))"
           size="md"
         />
-        <Knob
+        <ParamControl
           value={params.tone}
           min={0}
           max={1}
+          step={0.05}
           onChange={(v) => onParamChange('tone', v)}
           label="Tone"
           color="hsl(var(--pedal-drive))"

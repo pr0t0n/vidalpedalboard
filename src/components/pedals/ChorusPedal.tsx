@@ -1,5 +1,5 @@
 import { PedalCase } from '@/components/PedalCase';
-import { Knob } from '@/components/Knob';
+import { ParamControl } from '@/components/ParamControl';
 import { PedalParams } from '@/hooks/useAudioEngine';
 
 interface ChorusPedalProps {
@@ -20,30 +20,23 @@ export function ChorusPedal({ isOn, onToggle, params, onParamChange }: ChorusPed
       onToggle={onToggle}
     >
       <div className="flex gap-3">
-        <Knob
+        <ParamControl
           value={params.rate}
           min={0.01}
           max={8}
+          step={0.5}
           onChange={(v) => onParamChange('rate', v)}
           label="Rate"
           color="hsl(var(--pedal-chorus))"
           size="sm"
         />
-        <Knob
+        <ParamControl
           value={params.depth}
           min={0}
           max={1}
+          step={0.05}
           onChange={(v) => onParamChange('depth', v)}
           label="Depth"
-          color="hsl(var(--pedal-chorus))"
-          size="sm"
-        />
-        <Knob
-          value={params.feedback}
-          min={0}
-          max={1}
-          onChange={(v) => onParamChange('feedback', v)}
-          label="Mix"
           color="hsl(var(--pedal-chorus))"
           size="sm"
         />
