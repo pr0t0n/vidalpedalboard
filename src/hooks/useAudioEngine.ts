@@ -55,6 +55,12 @@ export interface TunerData {
   octave: number;
 }
 
+export interface PerformanceStats {
+  cpu: number;
+  memory: number;
+  latency: number;
+}
+
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
 function frequencyToNote(frequency: number): TunerData {
@@ -102,6 +108,8 @@ function autoCorrelate(buffer: Float32Array, sampleRate: number): number {
   const trimmedBuffer = buffer.slice(r1, r2);
   const trimmedSize = trimmedBuffer.length;
   
+  if (trimmedSize < 2) return -1;
+  
   const c = new Array(trimmedSize).fill(0);
   for (let i = 0; i < trimmedSize; i++) {
     for (let j = 0; j < trimmedSize - i; j++) {
@@ -110,7 +118,9 @@ function autoCorrelate(buffer: Float32Array, sampleRate: number): number {
   }
   
   let d = 0;
-  while (c[d] > c[d + 1]) d++;
+  while (d < trimmedSize - 1 && c[d] > c[d + 1]) d++;
+  
+  if (d >= trimmedSize - 1) return -1;
   
   let maxval = -1, maxpos = -1;
   for (let i = d; i < trimmedSize; i++) {
@@ -119,6 +129,8 @@ function autoCorrelate(buffer: Float32Array, sampleRate: number): number {
       maxpos = i;
     }
   }
+  
+  if (maxpos <= 0 || maxpos >= trimmedSize - 1) return -1;
   
   let T0 = maxpos;
   
@@ -134,7 +146,9 @@ export function useAudioEngine() {
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [inputLevel, setInputLevel] = useState(0);
   const [tunerData, setTunerData] = useState<TunerData>({ frequency: 0, note: '-', cents: 0, octave: 0 });
+  const [performanceStats, setPerformanceStats] = useState<PerformanceStats>({ cpu: 0, memory: 0, latency: 0 });
   
   const [pedalState, setPedalState] = useState<PedalState>({
     tuner: false,
@@ -159,19 +173,98 @@ export function useAudioEngine() {
   });
 
   const audioContextRef = useRef<AudioContext | null>(null);
-  const tunaRef = useRef<any>(null);
+  const tunaRef = useRef<Tuna | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const effectsRef = useRef<Record<string, any>>({});
   const animationFrameRef = useRef<number | null>(null);
+  const performanceIntervalRef = useRef<number | null>(null);
 
-  const createEffects = useCallback(() => {
-    if (!tunaRef.current || !audioContextRef.current) return;
+  // Check microphone permission status
+  const checkPermission = useCallback(async (): Promise<PermissionState | 'unknown'> => {
+    try {
+      if (navigator.permissions && navigator.permissions.query) {
+        const result = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+        return result.state;
+      }
+    } catch {
+      // Permissions API not supported
+    }
+    return 'unknown';
+  }, []);
+
+  const updatePerformanceStats = useCallback(() => {
+    const stats: PerformanceStats = { cpu: 0, memory: 0, latency: 0 };
+    
+    // Get memory usage if available
+    if ((performance as any).memory) {
+      const memInfo = (performance as any).memory;
+      stats.memory = Math.round((memInfo.usedJSHeapSize / memInfo.jsHeapSizeLimit) * 100);
+    }
+    
+    // Get audio latency
+    if (audioContextRef.current) {
+      stats.latency = Math.round((audioContextRef.current.baseLatency || 0) * 1000);
+    }
+    
+    // Estimate CPU based on audio processing
+    if (audioContextRef.current && audioContextRef.current.state === 'running') {
+      const now = performance.now();
+      const start = now;
+      // Simple CPU estimation based on frame timing
+      requestAnimationFrame(() => {
+        const frameTime = performance.now() - start;
+        stats.cpu = Math.min(100, Math.round(frameTime / 16.67 * 100));
+        setPerformanceStats(prev => ({ ...prev, ...stats }));
+      });
+    } else {
+      setPerformanceStats(stats);
+    }
+  }, []);
+
+  const updateInputLevel = useCallback(() => {
+    if (!analyserRef.current || !isConnected) {
+      animationFrameRef.current = requestAnimationFrame(updateInputLevel);
+      return;
+    }
+    
+    const analyser = analyserRef.current;
+    const bufferLength = analyser.fftSize;
+    const buffer = new Float32Array(bufferLength);
+    analyser.getFloatTimeDomainData(buffer);
+    
+    // Calculate RMS for level meter
+    let rms = 0;
+    for (let i = 0; i < bufferLength; i++) {
+      rms += buffer[i] * buffer[i];
+    }
+    rms = Math.sqrt(rms / bufferLength);
+    setInputLevel(Math.min(1, rms * 5));
+    
+    // Tuner detection
+    if (pedalState.tuner) {
+      const frequency = autoCorrelate(buffer, audioContextRef.current?.sampleRate || 44100);
+      if (frequency > 0) {
+        setTunerData(frequencyToNote(frequency));
+      }
+    }
+    
+    animationFrameRef.current = requestAnimationFrame(updateInputLevel);
+  }, [isConnected, pedalState.tuner]);
+
+  const createAndConnectEffects = useCallback(() => {
+    if (!tunaRef.current || !audioContextRef.current || !sourceRef.current || !gainNodeRef.current) {
+      console.error('Audio context not ready');
+      return;
+    }
     
     const tuna = tunaRef.current;
+    const ctx = audioContextRef.current;
     
-    effectsRef.current = {
+    // Create all effects
+    const effects = {
       compressor: new tuna.Compressor({
         threshold: params.compressor.threshold,
         ratio: params.compressor.ratio,
@@ -225,22 +318,17 @@ export function useAudioEngine() {
         bypass: !pedalState.reverb,
       }),
     };
-  }, [params, pedalState]);
-
-  const connectEffectsChain = useCallback(() => {
-    if (!sourceRef.current || !gainNodeRef.current || !audioContextRef.current) return;
     
-    const effects = effectsRef.current;
+    effectsRef.current = effects;
+    
+    // Connect chain: source -> analyser -> effects -> gain -> destination
+    sourceRef.current.connect(analyserRef.current!);
+    
+    let previousNode: AudioNode = analyserRef.current!;
     const order = ['compressor', 'overdrive', 'chorus', 'tremolo', 'delay', 'wahwah', 'convolver'];
     
-    let previousNode: AudioNode = sourceRef.current;
-    
-    if (analyserRef.current) {
-      previousNode.connect(analyserRef.current);
-    }
-    
     for (const effectName of order) {
-      const effect = effects[effectName];
+      const effect = effects[effectName as keyof typeof effects];
       if (effect) {
         previousNode.connect(effect);
         previousNode = effect;
@@ -248,68 +336,122 @@ export function useAudioEngine() {
     }
     
     previousNode.connect(gainNodeRef.current);
-    gainNodeRef.current.connect(audioContextRef.current.destination);
-  }, []);
+    gainNodeRef.current.connect(ctx.destination);
+    
+    console.log('Effects chain connected successfully');
+  }, [params, pedalState]);
 
-  const updateTuner = useCallback(() => {
-    if (!analyserRef.current || !pedalState.tuner) {
-      animationFrameRef.current = requestAnimationFrame(updateTuner);
-      return;
-    }
-    
-    const analyser = analyserRef.current;
-    const bufferLength = analyser.fftSize;
-    const buffer = new Float32Array(bufferLength);
-    analyser.getFloatTimeDomainData(buffer);
-    
-    const frequency = autoCorrelate(buffer, audioContextRef.current?.sampleRate || 44100);
-    
-    if (frequency > 0) {
-      setTunerData(frequencyToNote(frequency));
-    }
-    
-    animationFrameRef.current = requestAnimationFrame(updateTuner);
-  }, [pedalState.tuner]);
-
+  // CRITICAL: Direct gesture-to-capture pattern
   const connect = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     
     try {
+      // Check permission first
+      const permission = await checkPermission();
+      console.log('Microphone permission status:', permission);
+      
+      if (permission === 'denied') {
+        throw new Error('Acesso ao microfone negado. Habilite nas configurações do navegador.');
+      }
+      
+      console.log('Requesting microphone access...');
+      
+      // CRITICAL: getUserMedia called directly in gesture handler
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false,
-        } as MediaTrackConstraints,
+          channelCount: 1,
+          sampleRate: 44100,
+        },
       });
       
-      audioContextRef.current = new AudioContext({ latencyHint: 'interactive' });
-      tunaRef.current = new Tuna(audioContextRef.current);
+      console.log('Microphone stream obtained:', stream.getAudioTracks());
+      streamRef.current = stream;
       
-      sourceRef.current = audioContextRef.current.createMediaStreamSource(stream);
-      gainNodeRef.current = audioContextRef.current.createGain();
+      // Create audio context - must be after getUserMedia for Safari
+      const ctx = new AudioContext({ 
+        sampleRate: 44100,
+        latencyHint: 'interactive' 
+      });
+      
+      // Resume context if suspended (required for some browsers)
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
+      
+      console.log('AudioContext state:', ctx.state, 'Sample rate:', ctx.sampleRate);
+      
+      audioContextRef.current = ctx;
+      tunaRef.current = new Tuna(ctx);
+      
+      // Create source from stream
+      sourceRef.current = ctx.createMediaStreamSource(stream);
+      
+      // Create gain node for volume control
+      gainNodeRef.current = ctx.createGain();
       gainNodeRef.current.gain.value = params.volume;
       
-      analyserRef.current = audioContextRef.current.createAnalyser();
-      analyserRef.current.fftSize = 2048;
+      // Create analyser for level metering and tuner
+      analyserRef.current = ctx.createAnalyser();
+      analyserRef.current.fftSize = 4096;
+      analyserRef.current.smoothingTimeConstant = 0.8;
       
-      createEffects();
-      connectEffectsChain();
+      // Create and connect effects
+      createAndConnectEffects();
       
       setIsConnected(true);
-      animationFrameRef.current = requestAnimationFrame(updateTuner);
-    } catch (err) {
-      setError('Não foi possível acessar o microfone. Verifique as permissões.');
-      console.error(err);
+      
+      // Start monitoring
+      animationFrameRef.current = requestAnimationFrame(updateInputLevel);
+      performanceIntervalRef.current = window.setInterval(updatePerformanceStats, 1000);
+      
+      console.log('Audio engine connected successfully');
+      
+    } catch (err: any) {
+      console.error('Audio connection error:', err);
+      
+      let errorMessage = 'Erro ao conectar áudio.';
+      
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        errorMessage = 'Permissão de microfone negada. Clique no ícone de cadeado na barra de endereços e permita o acesso.';
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        errorMessage = 'Nenhum dispositivo de áudio encontrado. Verifique se o iRig está conectado.';
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        errorMessage = 'Dispositivo de áudio em uso por outro aplicativo.';
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      setError(errorMessage);
+      disconnect();
     } finally {
       setIsLoading(false);
     }
-  }, [createEffects, connectEffectsChain, updateTuner, params.volume]);
+  }, [params.volume, checkPermission, createAndConnectEffects, updateInputLevel, updatePerformanceStats]);
 
   const disconnect = useCallback(() => {
+    console.log('Disconnecting audio engine...');
+    
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    
+    if (performanceIntervalRef.current) {
+      clearInterval(performanceIntervalRef.current);
+      performanceIntervalRef.current = null;
+    }
+    
+    // Stop all tracks in the stream
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => {
+        track.stop();
+        console.log('Stopped track:', track.label);
+      });
+      streamRef.current = null;
     }
     
     if (audioContextRef.current) {
@@ -324,7 +466,9 @@ export function useAudioEngine() {
     effectsRef.current = {};
     
     setIsConnected(false);
+    setInputLevel(0);
     setTunerData({ frequency: 0, note: '-', cents: 0, octave: 0 });
+    setPerformanceStats({ cpu: 0, memory: 0, latency: 0 });
   }, []);
 
   const togglePedal = useCallback((pedal: keyof PedalState) => {
@@ -377,12 +521,7 @@ export function useAudioEngine() {
     }
   }, []);
 
-  useEffect(() => {
-    return () => {
-      disconnect();
-    };
-  }, [disconnect]);
-
+  // Update effects when params change
   useEffect(() => {
     if (!isConnected) return;
     
@@ -425,17 +564,27 @@ export function useAudioEngine() {
     }
   }, [params, isConnected]);
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      disconnect();
+    };
+  }, [disconnect]);
+
   return {
     isConnected,
     isLoading,
     error,
+    inputLevel,
     tunerData,
     pedalState,
     params,
+    performanceStats,
     connect,
     disconnect,
     togglePedal,
     updateParam,
     setVolume,
+    checkPermission,
   };
 }
