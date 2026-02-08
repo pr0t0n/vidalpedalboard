@@ -1,0 +1,44 @@
+import { PedalCase } from '@/components/PedalCase';
+import { Knob } from '@/components/Knob';
+import { PedalParams } from '@/hooks/useAudioEngine';
+
+interface DistortionPedalProps {
+  isOn: boolean;
+  onToggle: () => void;
+  params: PedalParams['distortion'];
+  onParamChange: (param: string, value: number) => void;
+}
+
+export function DistortionPedal({ isOn, onToggle, params, onParamChange }: DistortionPedalProps) {
+  return (
+    <PedalCase
+      name="DISTORTION"
+      subtitle="High Gain"
+      color="hsl(var(--pedal-distortion))"
+      glowColor="hsl(var(--pedal-distortion-glow))"
+      isOn={isOn}
+      onToggle={onToggle}
+    >
+      <div className="flex gap-4">
+        <Knob
+          value={params.gain}
+          min={0}
+          max={1}
+          onChange={(v) => onParamChange('gain', v)}
+          label="Gain"
+          color="hsl(var(--pedal-distortion))"
+          size="md"
+        />
+        <Knob
+          value={params.tone}
+          min={0}
+          max={1}
+          onChange={(v) => onParamChange('tone', v)}
+          label="Tone"
+          color="hsl(var(--pedal-distortion))"
+          size="md"
+        />
+      </div>
+    </PedalCase>
+  );
+}

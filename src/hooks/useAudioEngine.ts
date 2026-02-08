@@ -5,6 +5,7 @@ export interface PedalState {
   tuner: boolean;
   compressor: boolean;
   drive: boolean;
+  distortion: boolean;
   chorus: boolean;
   tremolo: boolean;
   delay: boolean;
@@ -20,6 +21,10 @@ export interface PedalParams {
     release: number;
   };
   drive: {
+    gain: number;
+    tone: number;
+  };
+  distortion: {
     gain: number;
     tone: number;
   };
@@ -71,75 +76,92 @@ function frequencyToNote(frequency: number): TunerData {
   const noteNum = 12 * (Math.log2(frequency / 440)) + 69;
   const roundedNote = Math.round(noteNum);
   const cents = Math.round((noteNum - roundedNote) * 100);
-  const note = NOTE_NAMES[roundedNote % 12];
+  const note = NOTE_NAMES[((roundedNote % 12) + 12) % 12];
   const octave = Math.floor(roundedNote / 12) - 1;
   
   return { frequency, note, cents, octave };
 }
 
-function autoCorrelate(buffer: Float32Array, sampleRate: number): number {
+// Improved pitch detection using YIN algorithm
+function detectPitch(buffer: Float32Array, sampleRate: number): number {
   const SIZE = buffer.length;
-  let rms = 0;
   
+  // Calculate RMS to check if there's enough signal
+  let rms = 0;
   for (let i = 0; i < SIZE; i++) {
     rms += buffer[i] * buffer[i];
   }
   rms = Math.sqrt(rms / SIZE);
   
+  // Threshold for signal detection
   if (rms < 0.01) return -1;
   
-  let r1 = 0, r2 = SIZE - 1;
-  const thres = 0.2;
+  // YIN algorithm implementation
+  const yinBuffer = new Float32Array(SIZE / 2);
+  let probability = 0;
+  let tau = -1;
   
-  for (let i = 0; i < SIZE / 2; i++) {
-    if (Math.abs(buffer[i]) < thres) {
-      r1 = i;
+  // Step 1: Difference function
+  for (let t = 0; t < SIZE / 2; t++) {
+    yinBuffer[t] = 0;
+    for (let j = 0; j < SIZE / 2; j++) {
+      const delta = buffer[j] - buffer[j + t];
+      yinBuffer[t] += delta * delta;
+    }
+  }
+  
+  // Step 2: Cumulative mean normalized difference
+  yinBuffer[0] = 1;
+  let runningSum = 0;
+  for (let t = 1; t < SIZE / 2; t++) {
+    runningSum += yinBuffer[t];
+    yinBuffer[t] *= t / runningSum;
+  }
+  
+  // Step 3: Absolute threshold
+  const threshold = 0.1;
+  for (let t = 2; t < SIZE / 2; t++) {
+    if (yinBuffer[t] < threshold) {
+      while (t + 1 < SIZE / 2 && yinBuffer[t + 1] < yinBuffer[t]) {
+        t++;
+      }
+      probability = 1 - yinBuffer[t];
+      tau = t;
       break;
     }
   }
   
-  for (let i = 1; i < SIZE / 2; i++) {
-    if (Math.abs(buffer[SIZE - i]) < thres) {
-      r2 = SIZE - i;
-      break;
-    }
+  if (tau === -1 || probability < 0.5) return -1;
+  
+  // Step 4: Parabolic interpolation
+  let betterTau: number;
+  if (tau < 1) {
+    betterTau = tau;
+  } else if (tau >= SIZE / 2 - 1) {
+    betterTau = tau;
+  } else {
+    const s0 = yinBuffer[tau - 1];
+    const s1 = yinBuffer[tau];
+    const s2 = yinBuffer[tau + 1];
+    betterTau = tau + (s2 - s0) / (2 * (2 * s1 - s2 - s0));
   }
   
-  const trimmedBuffer = buffer.slice(r1, r2);
-  const trimmedSize = trimmedBuffer.length;
+  return sampleRate / betterTau;
+}
+
+// Create distortion curve for waveshaper
+function makeDistortionCurve(amount: number): Float32Array<ArrayBuffer> {
+  const samples = 44100;
+  const buffer = new ArrayBuffer(samples * 4);
+  const curve = new Float32Array(buffer);
+  const deg = Math.PI / 180;
   
-  if (trimmedSize < 2) return -1;
-  
-  const c = new Array(trimmedSize).fill(0);
-  for (let i = 0; i < trimmedSize; i++) {
-    for (let j = 0; j < trimmedSize - i; j++) {
-      c[i] = c[i] + trimmedBuffer[j] * trimmedBuffer[j + i];
-    }
+  for (let i = 0; i < samples; i++) {
+    const x = (i * 2) / samples - 1;
+    curve[i] = ((3 + amount * 100) * x * 20 * deg) / (Math.PI + amount * 100 * Math.abs(x));
   }
   
-  let d = 0;
-  while (d < trimmedSize - 1 && c[d] > c[d + 1]) d++;
-  
-  if (d >= trimmedSize - 1) return -1;
-  
-  let maxval = -1, maxpos = -1;
-  for (let i = d; i < trimmedSize; i++) {
-    if (c[i] > maxval) {
-      maxval = c[i];
-      maxpos = i;
-    }
-  }
-  
-  if (maxpos <= 0 || maxpos >= trimmedSize - 1) return -1;
-  
-  let T0 = maxpos;
-  
-  const x1 = c[T0 - 1], x2 = c[T0], x3 = c[T0 + 1];
-  const a = (x1 + x3 - 2 * x2) / 2;
-  const b = (x3 - x1) / 2;
-  if (a) T0 = T0 - b / (2 * a);
-  
-  return sampleRate / T0;
+  return curve;
 }
 
 export function useAudioEngine() {
@@ -154,6 +176,7 @@ export function useAudioEngine() {
     tuner: false,
     compressor: false,
     drive: false,
+    distortion: false,
     chorus: false,
     tremolo: false,
     delay: false,
@@ -164,6 +187,7 @@ export function useAudioEngine() {
   const [params, setParams] = useState<PedalParams>({
     compressor: { threshold: -20, ratio: 4, attack: 0.003, release: 0.25 },
     drive: { gain: 0.5, tone: 0.5 },
+    distortion: { gain: 0.7, tone: 0.5 },
     chorus: { rate: 1.5, depth: 0.7, feedback: 0.4 },
     tremolo: { rate: 4, depth: 0.5 },
     delay: { time: 0.3, feedback: 0.4, mix: 0.5 },
@@ -178,12 +202,15 @@ export function useAudioEngine() {
   const streamRef = useRef<MediaStream | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const tunerAnalyserRef = useRef<AnalyserNode | null>(null);
   const stereoMergerRef = useRef<ChannelMergerNode | null>(null);
+  const distortionNodeRef = useRef<WaveShaperNode | null>(null);
+  const distortionGainRef = useRef<GainNode | null>(null);
+  const distortionToneRef = useRef<BiquadFilterNode | null>(null);
   const effectsRef = useRef<Record<string, any>>({});
   const animationFrameRef = useRef<number | null>(null);
   const performanceIntervalRef = useRef<number | null>(null);
 
-  // Check microphone permission status
   const checkPermission = useCallback(async (): Promise<PermissionState | 'unknown'> => {
     try {
       if (navigator.permissions && navigator.permissions.query) {
@@ -199,22 +226,18 @@ export function useAudioEngine() {
   const updatePerformanceStats = useCallback(() => {
     const stats: PerformanceStats = { cpu: 0, memory: 0, latency: 0 };
     
-    // Get memory usage if available
     if ((performance as any).memory) {
       const memInfo = (performance as any).memory;
       stats.memory = Math.round((memInfo.usedJSHeapSize / memInfo.jsHeapSizeLimit) * 100);
     }
     
-    // Get audio latency
     if (audioContextRef.current) {
       stats.latency = Math.round((audioContextRef.current.baseLatency || 0) * 1000);
     }
     
-    // Estimate CPU based on audio processing
     if (audioContextRef.current && audioContextRef.current.state === 'running') {
       const now = performance.now();
       const start = now;
-      // Simple CPU estimation based on frame timing
       requestAnimationFrame(() => {
         const frameTime = performance.now() - start;
         stats.cpu = Math.min(100, Math.round(frameTime / 16.67 * 100));
@@ -244,10 +267,13 @@ export function useAudioEngine() {
     rms = Math.sqrt(rms / bufferLength);
     setInputLevel(Math.min(1, rms * 5));
     
-    // Tuner detection
-    if (pedalState.tuner) {
-      const frequency = autoCorrelate(buffer, audioContextRef.current?.sampleRate || 44100);
-      if (frequency > 0) {
+    // Tuner detection using dedicated analyser
+    if (pedalState.tuner && tunerAnalyserRef.current) {
+      const tunerBuffer = new Float32Array(tunerAnalyserRef.current.fftSize);
+      tunerAnalyserRef.current.getFloatTimeDomainData(tunerBuffer);
+      
+      const frequency = detectPitch(tunerBuffer, audioContextRef.current?.sampleRate || 44100);
+      if (frequency > 0 && frequency < 2000) {
         setTunerData(frequencyToNote(frequency));
       }
     }
@@ -267,7 +293,24 @@ export function useAudioEngine() {
     // Create stereo merger for mono-to-stereo conversion
     stereoMergerRef.current = ctx.createChannelMerger(2);
     
-    // Create all effects
+    // Create dedicated tuner analyser (separate from main chain)
+    tunerAnalyserRef.current = ctx.createAnalyser();
+    tunerAnalyserRef.current.fftSize = 4096;
+    tunerAnalyserRef.current.smoothingTimeConstant = 0.0;
+    
+    // Create custom distortion effect using native WaveShaper
+    distortionNodeRef.current = ctx.createWaveShaper();
+    distortionNodeRef.current.curve = makeDistortionCurve(params.distortion.gain);
+    distortionNodeRef.current.oversample = '4x';
+    
+    distortionGainRef.current = ctx.createGain();
+    distortionGainRef.current.gain.value = pedalState.distortion ? 1 : 0;
+    
+    distortionToneRef.current = ctx.createBiquadFilter();
+    distortionToneRef.current.type = 'lowpass';
+    distortionToneRef.current.frequency.value = 2000 + params.distortion.tone * 6000;
+    
+    // Create Tuna effects
     const effects = {
       compressor: new tuna.Compressor({
         threshold: params.compressor.threshold,
@@ -325,38 +368,69 @@ export function useAudioEngine() {
     
     effectsRef.current = effects;
     
-    // Connect chain: source -> analyser -> effects -> gain -> stereo merger -> destination
-    // This ensures audio comes out of BOTH channels (stereo)
+    // Connect audio chain:
+    // Source -> Analyser -> Tuner Analyser (split) 
+    //        -> Compressor -> Drive -> Distortion -> Chorus -> Tremolo -> Delay -> Wah -> Reverb 
+    //        -> Gain -> Stereo Merger -> Destination
+    
     sourceRef.current.connect(analyserRef.current);
+    sourceRef.current.connect(tunerAnalyserRef.current); // Separate path for tuner
     
     let previousNode: AudioNode = analyserRef.current;
-    const order = ['compressor', 'overdrive', 'chorus', 'tremolo', 'delay', 'wahwah', 'convolver'];
     
-    for (const effectName of order) {
-      const effect = effects[effectName as keyof typeof effects];
-      if (effect) {
-        previousNode.connect(effect);
-        previousNode = effect;
-      }
-    }
+    // Compressor
+    previousNode.connect(effects.compressor);
+    previousNode = effects.compressor;
+    
+    // Overdrive
+    previousNode.connect(effects.overdrive);
+    previousNode = effects.overdrive;
+    
+    // Custom Distortion (parallel dry/wet mixing)
+    const distortionDryGain = ctx.createGain();
+    distortionDryGain.gain.value = pedalState.distortion ? 0 : 1;
+    
+    previousNode.connect(distortionDryGain);
+    previousNode.connect(distortionNodeRef.current);
+    distortionNodeRef.current.connect(distortionToneRef.current);
+    distortionToneRef.current.connect(distortionGainRef.current);
+    
+    const distortionMixer = ctx.createGain();
+    distortionDryGain.connect(distortionMixer);
+    distortionGainRef.current.connect(distortionMixer);
+    previousNode = distortionMixer;
+    
+    // Continue chain
+    previousNode.connect(effects.chorus);
+    previousNode = effects.chorus;
+    
+    previousNode.connect(effects.tremolo);
+    previousNode = effects.tremolo;
+    
+    previousNode.connect(effects.delay);
+    previousNode = effects.delay;
+    
+    previousNode.connect(effects.wahwah);
+    previousNode = effects.wahwah;
+    
+    previousNode.connect(effects.convolver);
+    previousNode = effects.convolver;
     
     previousNode.connect(gainNodeRef.current);
     
-    // Connect to stereo merger - duplicate mono signal to both L and R channels
-    gainNodeRef.current.connect(stereoMergerRef.current, 0, 0); // Left channel
-    gainNodeRef.current.connect(stereoMergerRef.current, 0, 1); // Right channel
+    // Connect to stereo output
+    gainNodeRef.current.connect(stereoMergerRef.current, 0, 0);
+    gainNodeRef.current.connect(stereoMergerRef.current, 0, 1);
     stereoMergerRef.current.connect(ctx.destination);
     
-    console.log('Effects chain connected successfully (stereo output)');
+    console.log('Effects chain connected successfully (stereo output with distortion)');
   }, [params, pedalState]);
 
-  // CRITICAL: Direct gesture-to-capture pattern
   const connect = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     
     try {
-      // Check permission first
       const permission = await checkPermission();
       console.log('Microphone permission status:', permission);
       
@@ -366,7 +440,6 @@ export function useAudioEngine() {
       
       console.log('Requesting microphone access...');
       
-      // CRITICAL: getUserMedia called directly in gesture handler
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: false,
@@ -380,13 +453,11 @@ export function useAudioEngine() {
       console.log('Microphone stream obtained:', stream.getAudioTracks());
       streamRef.current = stream;
       
-      // Create audio context - must be after getUserMedia for Safari
       const ctx = new AudioContext({ 
         sampleRate: 44100,
         latencyHint: 'interactive' 
       });
       
-      // Resume context if suspended (required for some browsers)
       if (ctx.state === 'suspended') {
         await ctx.resume();
       }
@@ -396,24 +467,19 @@ export function useAudioEngine() {
       audioContextRef.current = ctx;
       tunaRef.current = new Tuna(ctx);
       
-      // Create source from stream
       sourceRef.current = ctx.createMediaStreamSource(stream);
       
-      // Create gain node for volume control
       gainNodeRef.current = ctx.createGain();
       gainNodeRef.current.gain.value = params.volume;
       
-      // Create analyser for level metering and tuner
       analyserRef.current = ctx.createAnalyser();
-      analyserRef.current.fftSize = 4096;
+      analyserRef.current.fftSize = 2048;
       analyserRef.current.smoothingTimeConstant = 0.8;
       
-      // Create and connect effects
       createAndConnectEffects();
       
       setIsConnected(true);
       
-      // Start monitoring
       animationFrameRef.current = requestAnimationFrame(updateInputLevel);
       performanceIntervalRef.current = window.setInterval(updatePerformanceStats, 1000);
       
@@ -454,7 +520,6 @@ export function useAudioEngine() {
       performanceIntervalRef.current = null;
     }
     
-    // Stop all tracks in the stream
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => {
         track.stop();
@@ -470,7 +535,11 @@ export function useAudioEngine() {
     sourceRef.current = null;
     gainNodeRef.current = null;
     analyserRef.current = null;
+    tunerAnalyserRef.current = null;
     stereoMergerRef.current = null;
+    distortionNodeRef.current = null;
+    distortionGainRef.current = null;
+    distortionToneRef.current = null;
     audioContextRef.current = null;
     tunaRef.current = null;
     effectsRef.current = {};
@@ -485,6 +554,7 @@ export function useAudioEngine() {
     setPedalState(prev => {
       const newState = { ...prev, [pedal]: !prev[pedal] };
       
+      // Handle effect bypass
       const effectMap: Record<string, string> = {
         compressor: 'compressor',
         drive: 'overdrive',
@@ -498,6 +568,13 @@ export function useAudioEngine() {
       const effectName = effectMap[pedal];
       if (effectName && effectsRef.current[effectName]) {
         effectsRef.current[effectName].bypass = !newState[pedal];
+      }
+      
+      // Handle distortion separately (native Web Audio)
+      if (pedal === 'distortion') {
+        if (distortionGainRef.current) {
+          distortionGainRef.current.gain.value = newState.distortion ? 1 : 0;
+        }
       }
       
       return newState;
@@ -547,6 +624,14 @@ export function useAudioEngine() {
       effects.overdrive.curveAmount = params.drive.tone;
     }
     
+    // Update distortion
+    if (distortionNodeRef.current) {
+      distortionNodeRef.current.curve = makeDistortionCurve(params.distortion.gain);
+    }
+    if (distortionToneRef.current) {
+      distortionToneRef.current.frequency.value = 2000 + params.distortion.tone * 6000;
+    }
+    
     if (effects.chorus) {
       effects.chorus.rate = params.chorus.rate;
       effects.chorus.feedback = params.chorus.feedback;
@@ -581,7 +666,7 @@ export function useAudioEngine() {
     };
   }, [disconnect]);
 
-  // Apply preset - bulk update pedal state and params
+  // Apply preset
   const applyPreset = useCallback((
     newPedalState: Partial<PedalState>,
     newParams: Partial<PedalParams>
@@ -591,6 +676,7 @@ export function useAudioEngine() {
       const updated = { ...prev };
       if (newParams.compressor) updated.compressor = { ...prev.compressor, ...newParams.compressor };
       if (newParams.drive) updated.drive = { ...prev.drive, ...newParams.drive };
+      if (newParams.distortion) updated.distortion = { ...prev.distortion, ...newParams.distortion };
       if (newParams.chorus) updated.chorus = { ...prev.chorus, ...newParams.chorus };
       if (newParams.tremolo) updated.tremolo = { ...prev.tremolo, ...newParams.tremolo };
       if (newParams.delay) updated.delay = { ...prev.delay, ...newParams.delay };
