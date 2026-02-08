@@ -85,74 +85,95 @@ function frequencyToNote(frequency: number, clarity: number): TunerData {
   return { frequency, note, cents, octave, clarity };
 }
 
-// YIN algorithm for robust pitch detection
-function detectPitchYIN(buffer: Float32Array, sampleRate: number): { frequency: number; clarity: number } {
+// Autocorrelation pitch detection based on qiuxiang/tuner approach
+// More sensitive and works better with guitar signals
+function autoCorrelate(buffer: Float32Array, sampleRate: number): { frequency: number; clarity: number } {
   const SIZE = buffer.length;
-  const HALF_SIZE = Math.floor(SIZE / 2);
   
+  // Calculate RMS for signal detection
   let rms = 0;
   for (let i = 0; i < SIZE; i++) {
     rms += buffer[i] * buffer[i];
   }
   rms = Math.sqrt(rms / SIZE);
   
-  if (rms < 0.01) return { frequency: -1, clarity: 0 };
+  // Lower threshold for better sensitivity
+  if (rms < 0.005) return { frequency: -1, clarity: 0 };
   
-  const yinBuffer = new Float32Array(HALF_SIZE);
-  yinBuffer[0] = 1;
-  let runningSum = 0;
-  
-  for (let tau = 1; tau < HALF_SIZE; tau++) {
-    let diff = 0;
-    for (let i = 0; i < HALF_SIZE; i++) {
-      const delta = buffer[i] - buffer[i + tau];
-      diff += delta * delta;
-    }
-    runningSum += diff;
-    yinBuffer[tau] = diff * tau / runningSum;
+  // Normalize the buffer
+  const normalizedBuffer = new Float32Array(SIZE);
+  for (let i = 0; i < SIZE; i++) {
+    normalizedBuffer[i] = buffer[i];
   }
   
-  const threshold = 0.1;
-  let tau = 2;
+  // Autocorrelation
+  const correlations = new Float32Array(SIZE);
+  for (let lag = 0; lag < SIZE; lag++) {
+    let sum = 0;
+    for (let i = 0; i < SIZE - lag; i++) {
+      sum += normalizedBuffer[i] * normalizedBuffer[i + lag];
+    }
+    correlations[lag] = sum;
+  }
   
-  while (tau < HALF_SIZE - 1) {
-    if (yinBuffer[tau] < threshold) {
-      while (tau + 1 < HALF_SIZE && yinBuffer[tau + 1] < yinBuffer[tau]) {
-        tau++;
+  // Find the first peak after the initial decline
+  // Skip the first part (lag 0 correlation is always max)
+  let foundPeak = false;
+  let peakLag = -1;
+  let peakValue = 0;
+  
+  // Define search range for guitar frequencies (roughly 80Hz to 1200Hz)
+  const minPeriod = Math.floor(sampleRate / 1200); // ~1200Hz max
+  const maxPeriod = Math.floor(sampleRate / 60);   // ~60Hz min
+  
+  // Find where the correlation first dips below a threshold after lag 0
+  let lastCorr = correlations[0];
+  for (let i = 1; i < minPeriod && i < SIZE; i++) {
+    if (correlations[i] < lastCorr) {
+      lastCorr = correlations[i];
+    }
+  }
+  
+  // Now find the first significant peak
+  for (let lag = minPeriod; lag < Math.min(maxPeriod, SIZE - 1); lag++) {
+    const prev = correlations[lag - 1];
+    const curr = correlations[lag];
+    const next = correlations[lag + 1];
+    
+    // Check if this is a local maximum
+    if (curr > prev && curr >= next) {
+      // Check if this peak is significant (above 30% of the zero-lag correlation)
+      if (curr > correlations[0] * 0.3) {
+        if (!foundPeak || curr > peakValue) {
+          foundPeak = true;
+          peakLag = lag;
+          peakValue = curr;
+          break; // Take the first significant peak
+        }
       }
-      break;
     }
-    tau++;
   }
   
-  if (tau >= HALF_SIZE - 1) {
-    let minVal = Infinity;
-    let minTau = 2;
-    for (let i = 2; i < HALF_SIZE; i++) {
-      if (yinBuffer[i] < minVal) {
-        minVal = yinBuffer[i];
-        minTau = i;
-      }
-    }
-    if (minVal > 0.5) return { frequency: -1, clarity: 0 };
-    tau = minTau;
+  if (peakLag === -1) return { frequency: -1, clarity: 0 };
+  
+  // Parabolic interpolation for more accurate peak position
+  const y1 = correlations[peakLag - 1];
+  const y2 = correlations[peakLag];
+  const y3 = correlations[peakLag + 1];
+  
+  const a = (y1 + y3 - 2 * y2) / 2;
+  const b = (y3 - y1) / 2;
+  
+  let refinedLag = peakLag;
+  if (a !== 0) {
+    refinedLag = peakLag - b / (2 * a);
   }
   
-  let betterTau: number;
-  if (tau < 1 || tau >= HALF_SIZE - 1) {
-    betterTau = tau;
-  } else {
-    const s0 = yinBuffer[tau - 1];
-    const s1 = yinBuffer[tau];
-    const s2 = yinBuffer[tau + 1];
-    const denominator = 2 * s1 - s2 - s0;
-    betterTau = Math.abs(denominator) < 1e-10 ? tau : tau + (s2 - s0) / (2 * denominator);
-  }
+  const frequency = sampleRate / refinedLag;
+  const clarity = peakValue / correlations[0]; // Normalized clarity
   
-  const frequency = sampleRate / betterTau;
-  const clarity = 1 - yinBuffer[tau];
-  
-  if (frequency < 60 || frequency > 1500) {
+  // Validate frequency range for guitar
+  if (frequency < 60 || frequency > 1200) {
     return { frequency: -1, clarity: 0 };
   }
   
@@ -281,20 +302,20 @@ export function useAudioEngine() {
     rms = Math.sqrt(rms / bufferLength);
     setInputLevel(Math.min(1, rms * 5));
     
-    // Tuner detection using YIN algorithm
+    // Tuner detection using autocorrelation algorithm
     if (pedalState.tuner && tunerAnalyserRef.current && audioContextRef.current) {
       const tunerBuffer = new Float32Array(tunerAnalyserRef.current.fftSize);
       tunerAnalyserRef.current.getFloatTimeDomainData(tunerBuffer);
       
-      const result = detectPitchYIN(tunerBuffer, audioContextRef.current.sampleRate);
-      if (result.frequency > 0 && result.clarity > 0.6) {
+      const result = autoCorrelate(tunerBuffer, audioContextRef.current.sampleRate);
+      if (result.frequency > 0 && result.clarity > 0.3) {
         // Apply smoothing
         let smoothedFreq = result.frequency;
         if (lastFrequencyRef.current > 0) {
           const diff = Math.abs(result.frequency - lastFrequencyRef.current);
           const percentDiff = diff / lastFrequencyRef.current;
-          if (percentDiff < 0.1) {
-            smoothedFreq = 0.85 * lastFrequencyRef.current + 0.15 * result.frequency;
+          if (percentDiff < 0.15) {
+            smoothedFreq = 0.7 * lastFrequencyRef.current + 0.3 * result.frequency;
           }
         }
         

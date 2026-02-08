@@ -44,9 +44,17 @@ export function PedalCase({
       <div className="absolute top-2 left-2 w-2 h-2 rounded-full bg-metal-highlight/30 border border-metal-dark" />
       <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-metal-highlight/30 border border-metal-dark" />
       
-      {/* LED indicator */}
+      {/* LED indicator - Green when ON, Red when OFF */}
       <div className="flex items-center justify-center">
-        <LED isOn={isOn} customColor={isOn ? glowColor : undefined} size="md" />
+        <div
+          className="w-3 h-3 rounded-full transition-all duration-200 border border-black/30"
+          style={{
+            backgroundColor: isOn ? 'hsl(142, 70%, 45%)' : 'hsl(0, 65%, 40%)',
+            boxShadow: isOn
+              ? '0 0 8px hsl(142, 70%, 45%), 0 0 16px hsl(142, 70%, 45%), 0 0 24px hsl(142, 70%, 45% / 0.4)'
+              : '0 0 6px hsl(0, 65%, 40% / 0.5), inset 0 1px 2px rgba(0,0,0,0.5)',
+          }}
+        />
       </div>
       
       {/* Pedal name */}
