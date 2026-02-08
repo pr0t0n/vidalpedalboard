@@ -1,5 +1,5 @@
 import { PedalCase } from '@/components/PedalCase';
-import { ParamControl } from '@/components/ParamControl';
+import { Knob } from '@/components/Knob';
 import { PedalParams } from '@/hooks/useAudioEngine';
 
 interface ReverbPedalProps {
@@ -20,25 +20,23 @@ export function ReverbPedal({ isOn, onToggle, params, onParamChange }: ReverbPed
       onToggle={onToggle}
     >
       <div className="flex gap-4">
-        <ParamControl
+        <Knob
           value={params.decay}
           min={0}
           max={1}
-          step={0.05}
           onChange={(v) => onParamChange('decay', v)}
           label="Decay"
           color="hsl(var(--pedal-reverb))"
-          size="sm"
+          size="md"
         />
-        <ParamControl
+        <Knob
           value={params.mix}
           min={0}
           max={1}
-          step={0.05}
           onChange={(v) => onParamChange('mix', v)}
           label="Mix"
           color="hsl(var(--pedal-reverb))"
-          size="sm"
+          size="md"
         />
       </div>
     </PedalCase>
