@@ -42,13 +42,23 @@
     --stage-danger: 0 70% 50%;
 
     --pedal-tuner: 142 60% 40%;
+    --pedal-tuner-glow: 142 70% 50%;
     --pedal-compressor: 200 50% 45%;
+    --pedal-compressor-glow: 200 60% 55%;
     --pedal-drive: 25 70% 50%;
+    --pedal-drive-glow: 25 80% 60%;
+    --pedal-distortion: 0 70% 50%;
+    --pedal-distortion-glow: 0 80% 60%;
     --pedal-chorus: 220 50% 50%;
+    --pedal-chorus-glow: 220 60% 60%;
     --pedal-tremolo: 280 40% 50%;
+    --pedal-tremolo-glow: 280 50% 60%;
     --pedal-delay: 180 50% 40%;
+    --pedal-delay-glow: 180 60% 50%;
     --pedal-wah: 45 70% 50%;
+    --pedal-wah-glow: 45 80% 60%;
     --pedal-reverb: 260 40% 50%;
+    --pedal-reverb-glow: 260 50% 60%;
 
     --metal-dark: 0 0% 6%;
     --metal-mid: 0 0% 12%;

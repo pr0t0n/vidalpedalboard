@@ -18,6 +18,7 @@ export const presets: Preset[] = [
     pedalState: {
       compressor: true,
       drive: false,
+      distortion: false,
       chorus: false,
       tremolo: false,
       delay: false,
@@ -38,6 +39,7 @@ export const presets: Preset[] = [
     pedalState: {
       compressor: true,
       drive: true,
+      distortion: true,
       chorus: true,
       tremolo: false,
       delay: true,
@@ -46,7 +48,8 @@ export const presets: Preset[] = [
     },
     params: {
       compressor: { threshold: -15, ratio: 6, attack: 0.002, release: 0.2 },
-      drive: { gain: 0.75, tone: 0.65 },
+      drive: { gain: 0.6, tone: 0.7 },
+      distortion: { gain: 0.5, tone: 0.6 },
       chorus: { rate: 0.8, depth: 0.3, feedback: 0.2 },
       delay: { time: 0.35, feedback: 0.3, mix: 0.25 },
       reverb: { decay: 0.4, mix: 0.3 },
@@ -61,6 +64,7 @@ export const presets: Preset[] = [
     pedalState: {
       compressor: true,
       drive: true,
+      distortion: false,
       chorus: false,
       tremolo: false,
       delay: false,
@@ -82,6 +86,7 @@ export const presets: Preset[] = [
     pedalState: {
       compressor: true,
       drive: true,
+      distortion: true,
       chorus: false,
       tremolo: false,
       delay: false,
@@ -90,7 +95,8 @@ export const presets: Preset[] = [
     },
     params: {
       compressor: { threshold: -12, ratio: 8, attack: 0.001, release: 0.15 },
-      drive: { gain: 0.95, tone: 0.55 },
+      drive: { gain: 0.7, tone: 0.55 },
+      distortion: { gain: 0.9, tone: 0.4 },
       reverb: { decay: 0.25, mix: 0.15 },
       volume: 0.9,
     },
@@ -103,6 +109,7 @@ export const presets: Preset[] = [
     pedalState: {
       compressor: true,
       drive: true,
+      distortion: false,
       chorus: false,
       tremolo: false,
       delay: true,
@@ -125,6 +132,7 @@ export const presets: Preset[] = [
     pedalState: {
       compressor: true,
       drive: false,
+      distortion: false,
       chorus: true,
       tremolo: true,
       delay: true,
@@ -148,6 +156,7 @@ export const presets: Preset[] = [
     pedalState: {
       compressor: true,
       drive: false,
+      distortion: false,
       chorus: false,
       tremolo: false,
       delay: false,
@@ -158,6 +167,31 @@ export const presets: Preset[] = [
       compressor: { threshold: -20, ratio: 4, attack: 0.002, release: 0.2 },
       wah: { frequency: 0.5, resonance: 15 },
       volume: 0.8,
+    },
+  },
+  {
+    id: 'eruption',
+    name: 'Eruption',
+    description: 'Solo Van Halen - Tapping tone',
+    category: 'rock',
+    pedalState: {
+      compressor: true,
+      drive: true,
+      distortion: true,
+      chorus: true,
+      tremolo: false,
+      delay: true,
+      wah: false,
+      reverb: true,
+    },
+    params: {
+      compressor: { threshold: -10, ratio: 8, attack: 0.001, release: 0.15 },
+      drive: { gain: 0.8, tone: 0.6 },
+      distortion: { gain: 0.65, tone: 0.55 },
+      chorus: { rate: 1.2, depth: 0.4, feedback: 0.3 },
+      delay: { time: 0.4, feedback: 0.35, mix: 0.3 },
+      reverb: { decay: 0.5, mix: 0.35 },
+      volume: 0.9,
     },
   },
 ];

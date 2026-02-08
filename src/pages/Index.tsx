@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { useAudioEngine } from '@/hooks/useAudioEngine';
 import { CompressorPedal } from '@/components/pedals/CompressorPedal';
 import { DrivePedal } from '@/components/pedals/DrivePedal';
+import { DistortionPedal } from '@/components/pedals/DistortionPedal';
 import { ChorusPedal } from '@/components/pedals/ChorusPedal';
 import { TremoloPedal } from '@/components/pedals/TremoloPedal';
 import { DelayPedal } from '@/components/pedals/DelayPedal';
@@ -172,6 +173,8 @@ const Index = () => {
             <span>→</span>
             <span className={pedalState.drive ? 'text-[hsl(var(--pedal-drive))]' : ''}>DRIVE</span>
             <span>→</span>
+            <span className={pedalState.distortion ? 'text-[hsl(var(--pedal-distortion))]' : ''}>DIST</span>
+            <span>→</span>
             <span className={pedalState.chorus ? 'text-[hsl(var(--pedal-chorus))]' : ''}>CHORUS</span>
             <span>→</span>
             <span className={pedalState.tremolo ? 'text-[hsl(var(--pedal-tremolo))]' : ''}>TREM</span>
@@ -187,7 +190,7 @@ const Index = () => {
         </div>
 
         {/* Pedals Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 mb-6">
           <CompressorPedal
             isOn={pedalState.compressor}
             onToggle={() => togglePedal('compressor')}
@@ -199,6 +202,12 @@ const Index = () => {
             onToggle={() => togglePedal('drive')}
             params={params.drive}
             onParamChange={(param, value) => updateParam('drive', param, value)}
+          />
+          <DistortionPedal
+            isOn={pedalState.distortion}
+            onToggle={() => togglePedal('distortion')}
+            params={params.distortion}
+            onParamChange={(param, value) => updateParam('distortion', param, value)}
           />
           <ChorusPedal
             isOn={pedalState.chorus}
