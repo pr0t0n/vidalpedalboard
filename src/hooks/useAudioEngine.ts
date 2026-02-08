@@ -581,6 +581,26 @@ export function useAudioEngine() {
     };
   }, [disconnect]);
 
+  // Apply preset - bulk update pedal state and params
+  const applyPreset = useCallback((
+    newPedalState: Partial<PedalState>,
+    newParams: Partial<PedalParams>
+  ) => {
+    setPedalState(prev => ({ ...prev, ...newPedalState }));
+    setParams(prev => {
+      const updated = { ...prev };
+      if (newParams.compressor) updated.compressor = { ...prev.compressor, ...newParams.compressor };
+      if (newParams.drive) updated.drive = { ...prev.drive, ...newParams.drive };
+      if (newParams.chorus) updated.chorus = { ...prev.chorus, ...newParams.chorus };
+      if (newParams.tremolo) updated.tremolo = { ...prev.tremolo, ...newParams.tremolo };
+      if (newParams.delay) updated.delay = { ...prev.delay, ...newParams.delay };
+      if (newParams.wah) updated.wah = { ...prev.wah, ...newParams.wah };
+      if (newParams.reverb) updated.reverb = { ...prev.reverb, ...newParams.reverb };
+      if (newParams.volume !== undefined) updated.volume = newParams.volume;
+      return updated;
+    });
+  }, []);
+
   return {
     isConnected,
     isLoading,
@@ -596,5 +616,6 @@ export function useAudioEngine() {
     updateParam,
     setVolume,
     checkPermission,
+    applyPreset,
   };
 }

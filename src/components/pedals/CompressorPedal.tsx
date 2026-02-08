@@ -1,5 +1,5 @@
 import { PedalCase } from '@/components/PedalCase';
-import { ParamControl } from '@/components/ParamControl';
+import { Knob } from '@/components/Knob';
 import { PedalParams } from '@/hooks/useAudioEngine';
 
 interface CompressorPedalProps {
@@ -20,26 +20,41 @@ export function CompressorPedal({ isOn, onToggle, params, onParamChange }: Compr
       onToggle={onToggle}
     >
       <div className="grid grid-cols-2 gap-3">
-        <ParamControl
+        <Knob
           value={params.threshold}
           min={-60}
           max={0}
-          step={3}
           onChange={(v) => onParamChange('threshold', v)}
           label="Thresh"
           color="hsl(var(--pedal-compressor))"
           size="sm"
         />
-        <ParamControl
+        <Knob
           value={params.ratio}
           min={1}
           max={20}
-          step={1}
           onChange={(v) => onParamChange('ratio', v)}
           label="Ratio"
           color="hsl(var(--pedal-compressor))"
           size="sm"
-          showPercentage={false}
+        />
+        <Knob
+          value={params.attack * 1000}
+          min={0}
+          max={100}
+          onChange={(v) => onParamChange('attack', v / 1000)}
+          label="Attack"
+          color="hsl(var(--pedal-compressor))"
+          size="sm"
+        />
+        <Knob
+          value={params.release * 1000}
+          min={10}
+          max={1000}
+          onChange={(v) => onParamChange('release', v / 1000)}
+          label="Release"
+          color="hsl(var(--pedal-compressor))"
+          size="sm"
         />
       </div>
     </PedalCase>
