@@ -1,96 +1,84 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;900&family=Inter:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
-
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background: 220 15% 8%;
+    --foreground: 45 10% 90%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card: 220 12% 12%;
+    --card-foreground: 45 10% 90%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover: 220 12% 10%;
+    --popover-foreground: 45 10% 90%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    --primary: 45 100% 50%;
+    --primary-foreground: 220 15% 8%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 220 10% 18%;
+    --secondary-foreground: 45 10% 85%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 220 10% 15%;
+    --muted-foreground: 220 10% 50%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent: 280 60% 55%;
+    --accent-foreground: 45 10% 95%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 45 10% 95%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --border: 220 10% 20%;
+    --input: 220 10% 18%;
+    --ring: 45 100% 50%;
 
     --radius: 0.5rem;
 
-    --sidebar-background: 0 0% 98%;
+    /* Pedal Colors */
+    --pedal-tuner: 160 80% 45%;
+    --pedal-tuner-glow: 160 90% 55%;
+    --pedal-compressor: 35 90% 55%;
+    --pedal-compressor-glow: 35 100% 65%;
+    --pedal-drive: 0 75% 50%;
+    --pedal-drive-glow: 0 85% 60%;
+    --pedal-chorus: 200 80% 55%;
+    --pedal-chorus-glow: 200 90% 65%;
+    --pedal-tremolo: 280 70% 55%;
+    --pedal-tremolo-glow: 280 80% 65%;
+    --pedal-delay: 180 70% 45%;
+    --pedal-delay-glow: 180 80% 55%;
+    --pedal-wah: 50 90% 55%;
+    --pedal-wah-glow: 50 100% 65%;
+    --pedal-reverb: 260 60% 55%;
+    --pedal-reverb-glow: 260 70% 65%;
 
-    --sidebar-foreground: 240 5.3% 26.1%;
+    /* LED Colors */
+    --led-on: 120 100% 50%;
+    --led-off: 120 30% 20%;
+    --led-tuner-sharp: 0 100% 50%;
+    --led-tuner-flat: 45 100% 50%;
 
-    --sidebar-primary: 240 5.9% 10%;
+    /* Metal textures */
+    --metal-dark: 220 10% 10%;
+    --metal-mid: 220 8% 18%;
+    --metal-light: 220 6% 25%;
+    --metal-highlight: 220 5% 35%;
 
-    --sidebar-primary-foreground: 0 0% 98%;
+    /* Gradients */
+    --gradient-metal: linear-gradient(145deg, hsl(220 8% 20%) 0%, hsl(220 10% 12%) 50%, hsl(220 12% 8%) 100%);
+    --gradient-knob: linear-gradient(145deg, hsl(220 6% 30%) 0%, hsl(220 8% 18%) 50%, hsl(220 10% 12%) 100%);
+    --gradient-chassis: linear-gradient(180deg, hsl(220 8% 15%) 0%, hsl(220 10% 10%) 100%);
 
-    --sidebar-accent: 240 4.8% 95.9%;
-
-    --sidebar-accent-foreground: 240 5.9% 10%;
-
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --shadow-pedal: 0 8px 32px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);
+    --shadow-knob: 0 4px 12px rgba(0,0,0,0.5), inset 0 2px 4px rgba(255,255,255,0.1);
+    --shadow-led-on: 0 0 20px currentColor, 0 0 40px currentColor;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --background: 220 15% 6%;
+    --foreground: 45 10% 92%;
   }
 }
 
@@ -100,6 +88,35 @@ All colors MUST be HSL.
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', sans-serif;
+    background-image: 
+      radial-gradient(ellipse at 50% 0%, hsl(220 15% 12%) 0%, transparent 50%),
+      linear-gradient(180deg, hsl(220 15% 8%) 0%, hsl(220 18% 5%) 100%);
+    min-height: 100vh;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: 'Orbitron', sans-serif;
+  }
+
+  .metal-texture {
+    background: var(--gradient-metal);
+    box-shadow: var(--shadow-pedal);
+  }
+
+  .knob-texture {
+    background: var(--gradient-knob);
+    box-shadow: var(--shadow-knob);
+  }
+
+  .led-glow {
+    box-shadow: var(--shadow-led-on);
+  }
+
+  .pedal-shadow {
+    box-shadow: var(--shadow-pedal);
   }
 }
