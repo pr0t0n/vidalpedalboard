@@ -5,9 +5,10 @@ interface TunerPedalProps {
   isOn: boolean;
   onToggle: () => void;
   tunerData: TunerData;
+  isConnected?: boolean;
 }
 
-export function TunerPedal({ isOn, onToggle, tunerData }: TunerPedalProps) {
+export function TunerPedal({ isOn, onToggle, tunerData, isConnected = true }: TunerPedalProps) {
   const getCentsColor = () => {
     if (Math.abs(tunerData.cents) <= 5) return 'hsl(120 100% 50%)';
     if (tunerData.cents > 5) return 'hsl(0 100% 50%)';

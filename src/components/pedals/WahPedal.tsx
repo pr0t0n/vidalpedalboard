@@ -1,5 +1,5 @@
 import { PedalCase } from '@/components/PedalCase';
-import { Knob } from '@/components/Knob';
+import { ParamControl } from '@/components/ParamControl';
 import { PedalParams } from '@/hooks/useAudioEngine';
 
 interface WahPedalProps {
@@ -20,23 +20,25 @@ export function WahPedal({ isOn, onToggle, params, onParamChange }: WahPedalProp
       onToggle={onToggle}
     >
       <div className="flex gap-4">
-        <Knob
+        <ParamControl
           value={params.frequency}
           min={0}
           max={1}
+          step={0.05}
           onChange={(v) => onParamChange('frequency', v)}
           label="Freq"
           color="hsl(var(--pedal-wah))"
-          size="md"
+          size="sm"
         />
-        <Knob
+        <ParamControl
           value={params.resonance}
           min={1}
           max={30}
+          step={1}
           onChange={(v) => onParamChange('resonance', v)}
           label="Res"
           color="hsl(var(--pedal-wah))"
-          size="md"
+          size="sm"
         />
       </div>
     </PedalCase>

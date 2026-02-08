@@ -178,6 +178,7 @@ export function useAudioEngine() {
   const streamRef = useRef<MediaStream | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const stereoMergerRef = useRef<ChannelMergerNode | null>(null);
   const effectsRef = useRef<Record<string, any>>({});
   const animationFrameRef = useRef<number | null>(null);
   const performanceIntervalRef = useRef<number | null>(null);
@@ -255,13 +256,16 @@ export function useAudioEngine() {
   }, [isConnected, pedalState.tuner]);
 
   const createAndConnectEffects = useCallback(() => {
-    if (!tunaRef.current || !audioContextRef.current || !sourceRef.current || !gainNodeRef.current) {
+    if (!tunaRef.current || !audioContextRef.current || !sourceRef.current || !gainNodeRef.current || !analyserRef.current) {
       console.error('Audio context not ready');
       return;
     }
     
     const tuna = tunaRef.current;
     const ctx = audioContextRef.current;
+    
+    // Create stereo merger for mono-to-stereo conversion
+    stereoMergerRef.current = ctx.createChannelMerger(2);
     
     // Create all effects
     const effects = {
@@ -273,9 +277,9 @@ export function useAudioEngine() {
         bypass: !pedalState.compressor,
       }),
       overdrive: new tuna.Overdrive({
-        outputGain: params.drive.gain * 0.5 - 0.25,
-        drive: params.drive.gain,
-        curveAmount: params.drive.tone,
+        outputGain: 0.5,
+        drive: params.drive.gain * 0.8 + 0.2,
+        curveAmount: params.drive.tone * 0.8,
         algorithmIndex: 0,
         bypass: !pedalState.drive,
       }),
@@ -321,10 +325,11 @@ export function useAudioEngine() {
     
     effectsRef.current = effects;
     
-    // Connect chain: source -> analyser -> effects -> gain -> destination
-    sourceRef.current.connect(analyserRef.current!);
+    // Connect chain: source -> analyser -> effects -> gain -> stereo merger -> destination
+    // This ensures audio comes out of BOTH channels (stereo)
+    sourceRef.current.connect(analyserRef.current);
     
-    let previousNode: AudioNode = analyserRef.current!;
+    let previousNode: AudioNode = analyserRef.current;
     const order = ['compressor', 'overdrive', 'chorus', 'tremolo', 'delay', 'wahwah', 'convolver'];
     
     for (const effectName of order) {
@@ -336,9 +341,13 @@ export function useAudioEngine() {
     }
     
     previousNode.connect(gainNodeRef.current);
-    gainNodeRef.current.connect(ctx.destination);
     
-    console.log('Effects chain connected successfully');
+    // Connect to stereo merger - duplicate mono signal to both L and R channels
+    gainNodeRef.current.connect(stereoMergerRef.current, 0, 0); // Left channel
+    gainNodeRef.current.connect(stereoMergerRef.current, 0, 1); // Right channel
+    stereoMergerRef.current.connect(ctx.destination);
+    
+    console.log('Effects chain connected successfully (stereo output)');
   }, [params, pedalState]);
 
   // CRITICAL: Direct gesture-to-capture pattern
@@ -461,6 +470,7 @@ export function useAudioEngine() {
     sourceRef.current = null;
     gainNodeRef.current = null;
     analyserRef.current = null;
+    stereoMergerRef.current = null;
     audioContextRef.current = null;
     tunaRef.current = null;
     effectsRef.current = {};

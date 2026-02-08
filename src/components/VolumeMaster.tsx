@@ -3,11 +3,17 @@ import { LED } from '@/components/LED';
 
 interface VolumeMasterProps {
   volume: number;
-  onVolumeChange: (value: number) => void;
-  isConnected: boolean;
+  onChange?: (value: number) => void;
+  onVolumeChange?: (value: number) => void;
+  level?: number;
+  isConnected?: boolean;
 }
 
-export function VolumeMaster({ volume, onVolumeChange, isConnected }: VolumeMasterProps) {
+export function VolumeMaster({ volume, onChange, onVolumeChange, level = 0, isConnected = true }: VolumeMasterProps) {
+  const handleChange = (value: number) => {
+    onChange?.(value);
+    onVolumeChange?.(value);
+  };
   return (
     <div
       className="flex flex-col items-center gap-4 p-5 rounded-xl border border-metal-highlight/20"
@@ -65,7 +71,7 @@ export function VolumeMaster({ volume, onVolumeChange, isConnected }: VolumeMast
         value={volume}
         min={0}
         max={1}
-        onChange={onVolumeChange}
+        onChange={handleChange}
         label="Volume"
         size="lg"
       />

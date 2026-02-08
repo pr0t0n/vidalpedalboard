@@ -1,5 +1,5 @@
 import { PedalCase } from '@/components/PedalCase';
-import { Knob } from '@/components/Knob';
+import { ParamControl } from '@/components/ParamControl';
 import { PedalParams } from '@/hooks/useAudioEngine';
 
 interface DelayPedalProps {
@@ -20,28 +20,31 @@ export function DelayPedal({ isOn, onToggle, params, onParamChange }: DelayPedal
       onToggle={onToggle}
     >
       <div className="flex gap-3">
-        <Knob
-          value={params.time * 1000}
-          min={50}
-          max={1000}
-          onChange={(v) => onParamChange('time', v / 1000)}
+        <ParamControl
+          value={params.time}
+          min={0.05}
+          max={1}
+          step={0.05}
+          onChange={(v) => onParamChange('time', v)}
           label="Time"
           color="hsl(var(--pedal-delay))"
           size="sm"
         />
-        <Knob
+        <ParamControl
           value={params.feedback}
           min={0}
           max={0.9}
+          step={0.05}
           onChange={(v) => onParamChange('feedback', v)}
           label="Repeat"
           color="hsl(var(--pedal-delay))"
           size="sm"
         />
-        <Knob
+        <ParamControl
           value={params.mix}
           min={0}
           max={1}
+          step={0.05}
           onChange={(v) => onParamChange('mix', v)}
           label="Mix"
           color="hsl(var(--pedal-delay))"
