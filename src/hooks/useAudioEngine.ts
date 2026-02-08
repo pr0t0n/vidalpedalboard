@@ -85,99 +85,63 @@ function frequencyToNote(frequency: number, clarity: number): TunerData {
   return { frequency, note, cents, octave, clarity };
 }
 
-// Autocorrelation pitch detection based on qiuxiang/tuner approach
-// More sensitive and works better with guitar signals
+// Autocorrelation pitch detection (inspirado em implementações de tuner WebAudio)
+// Otimizado: só varre offsets do range de guitarra e usa diferença absoluta (mais leve que N^2 completo).
 function autoCorrelate(buffer: Float32Array, sampleRate: number): { frequency: number; clarity: number } {
   const SIZE = buffer.length;
-  
-  // Calculate RMS for signal detection
+
+  // RMS (sensibilidade)
   let rms = 0;
-  for (let i = 0; i < SIZE; i++) {
-    rms += buffer[i] * buffer[i];
-  }
+  for (let i = 0; i < SIZE; i++) rms += buffer[i] * buffer[i];
   rms = Math.sqrt(rms / SIZE);
-  
-  // Lower threshold for better sensitivity
-  if (rms < 0.005) return { frequency: -1, clarity: 0 };
-  
-  // Normalize the buffer
-  const normalizedBuffer = new Float32Array(SIZE);
-  for (let i = 0; i < SIZE; i++) {
-    normalizedBuffer[i] = buffer[i];
-  }
-  
-  // Autocorrelation
-  const correlations = new Float32Array(SIZE);
-  for (let lag = 0; lag < SIZE; lag++) {
-    let sum = 0;
-    for (let i = 0; i < SIZE - lag; i++) {
-      sum += normalizedBuffer[i] * normalizedBuffer[i + lag];
+  if (rms < 0.003) return { frequency: -1, clarity: 0 };
+
+  // Range de offsets (frequências típicas guitarra)
+  const minOffset = Math.max(8, Math.floor(sampleRate / 1200));
+  const maxOffset = Math.min(SIZE - 1, Math.floor(sampleRate / 60));
+
+  // Janela menor para reduzir custo e reduzir influência de ruído
+  const windowSize = Math.min(1024, SIZE - maxOffset);
+  if (windowSize < 256) return { frequency: -1, clarity: 0 };
+
+  let bestOffset = -1;
+  let bestCorrelation = 0;
+  let lastCorrelation = 1;
+  let foundGoodCorrelation = false;
+
+  for (let offset = minOffset; offset <= maxOffset; offset++) {
+    let diffSum = 0;
+    for (let i = 0; i < windowSize; i++) {
+      diffSum += Math.abs(buffer[i] - buffer[i + offset]);
     }
-    correlations[lag] = sum;
-  }
-  
-  // Find the first peak after the initial decline
-  // Skip the first part (lag 0 correlation is always max)
-  let foundPeak = false;
-  let peakLag = -1;
-  let peakValue = 0;
-  
-  // Define search range for guitar frequencies (roughly 80Hz to 1200Hz)
-  const minPeriod = Math.floor(sampleRate / 1200); // ~1200Hz max
-  const maxPeriod = Math.floor(sampleRate / 60);   // ~60Hz min
-  
-  // Find where the correlation first dips below a threshold after lag 0
-  let lastCorr = correlations[0];
-  for (let i = 1; i < minPeriod && i < SIZE; i++) {
-    if (correlations[i] < lastCorr) {
-      lastCorr = correlations[i];
+
+    const correlation = 1 - diffSum / windowSize; // 1 = perfeito, 0 = ruim
+
+    if (correlation > 0.85 && correlation > lastCorrelation) {
+      foundGoodCorrelation = true;
     }
-  }
-  
-  // Now find the first significant peak
-  for (let lag = minPeriod; lag < Math.min(maxPeriod, SIZE - 1); lag++) {
-    const prev = correlations[lag - 1];
-    const curr = correlations[lag];
-    const next = correlations[lag + 1];
-    
-    // Check if this is a local maximum
-    if (curr > prev && curr >= next) {
-      // Check if this peak is significant (above 30% of the zero-lag correlation)
-      if (curr > correlations[0] * 0.3) {
-        if (!foundPeak || curr > peakValue) {
-          foundPeak = true;
-          peakLag = lag;
-          peakValue = curr;
-          break; // Take the first significant peak
-        }
-      }
+
+    if (foundGoodCorrelation && correlation < lastCorrelation) {
+      // Passou do pico
+      break;
     }
+
+    if (correlation > bestCorrelation) {
+      bestCorrelation = correlation;
+      bestOffset = offset;
+    }
+
+    lastCorrelation = correlation;
   }
-  
-  if (peakLag === -1) return { frequency: -1, clarity: 0 };
-  
-  // Parabolic interpolation for more accurate peak position
-  const y1 = correlations[peakLag - 1];
-  const y2 = correlations[peakLag];
-  const y3 = correlations[peakLag + 1];
-  
-  const a = (y1 + y3 - 2 * y2) / 2;
-  const b = (y3 - y1) / 2;
-  
-  let refinedLag = peakLag;
-  if (a !== 0) {
-    refinedLag = peakLag - b / (2 * a);
-  }
-  
-  const frequency = sampleRate / refinedLag;
-  const clarity = peakValue / correlations[0]; // Normalized clarity
-  
-  // Validate frequency range for guitar
-  if (frequency < 60 || frequency > 1200) {
+
+  if (bestOffset === -1 || bestCorrelation < 0.25) {
     return { frequency: -1, clarity: 0 };
   }
-  
-  return { frequency, clarity };
+
+  const frequency = sampleRate / bestOffset;
+  if (frequency < 60 || frequency > 1200) return { frequency: -1, clarity: 0 };
+
+  return { frequency, clarity: bestCorrelation };
 }
 
 // Create distortion curve for waveshaper
@@ -308,7 +272,7 @@ export function useAudioEngine() {
       tunerAnalyserRef.current.getFloatTimeDomainData(tunerBuffer);
       
       const result = autoCorrelate(tunerBuffer, audioContextRef.current.sampleRate);
-      if (result.frequency > 0 && result.clarity > 0.3) {
+      if (result.frequency > 0 && result.clarity > 0.15) {
         // Apply smoothing
         let smoothedFreq = result.frequency;
         if (lastFrequencyRef.current > 0) {
@@ -354,7 +318,7 @@ export function useAudioEngine() {
     // Create dedicated tuner analyser (separate from main chain)
     tunerAnalyserRef.current = ctx.createAnalyser();
     tunerAnalyserRef.current.fftSize = 4096;
-    tunerAnalyserRef.current.smoothingTimeConstant = 0.0;
+    tunerAnalyserRef.current.smoothingTimeConstant = 0.2;
     
     // Create custom distortion effect using native WaveShaper
     distortionNodeRef.current = ctx.createWaveShaper();
@@ -432,7 +396,21 @@ export function useAudioEngine() {
     //        -> Gain -> Stereo Merger -> Destination
     
     sourceRef.current.connect(analyserRef.current);
-    sourceRef.current.connect(tunerAnalyserRef.current); // Separate path for tuner
+
+    // Tuner: band-pass simples (highpass + lowpass) para reduzir ruído
+    const tunerHighpass = ctx.createBiquadFilter();
+    tunerHighpass.type = 'highpass';
+    tunerHighpass.frequency.value = 60;
+    tunerHighpass.Q.value = 0.707;
+
+    const tunerLowpass = ctx.createBiquadFilter();
+    tunerLowpass.type = 'lowpass';
+    tunerLowpass.frequency.value = 1500;
+    tunerLowpass.Q.value = 0.707;
+
+    sourceRef.current.connect(tunerHighpass);
+    tunerHighpass.connect(tunerLowpass);
+    tunerLowpass.connect(tunerAnalyserRef.current);
     
     let previousNode: AudioNode = analyserRef.current;
     

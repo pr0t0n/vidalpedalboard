@@ -16,16 +16,8 @@ export function LED({ isOn, color = 'green', customColor, size = 'md' }: LEDProp
   
   const getColor = () => {
     if (customColor) return customColor;
-    switch (color) {
-      case 'green':
-        return isOn ? 'hsl(120 100% 50%)' : 'hsl(120 30% 20%)';
-      case 'red':
-        return isOn ? 'hsl(0 100% 50%)' : 'hsl(0 30% 20%)';
-      case 'yellow':
-        return isOn ? 'hsl(45 100% 50%)' : 'hsl(45 30% 20%)';
-      default:
-        return isOn ? 'hsl(120 100% 50%)' : 'hsl(120 30% 20%)';
-    }
+    // Pedido: verde quando ligado, vermelho quando desligado
+    return isOn ? 'hsl(var(--stage-active))' : 'hsl(var(--stage-danger))';
   };
   
   const ledColor = getColor();
