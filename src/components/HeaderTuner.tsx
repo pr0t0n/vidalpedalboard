@@ -1,4 +1,4 @@
-import { TunerData } from '@/hooks/useAudioEngine';
+import { TunerData } from '@/hooks/usePitchDetection';
 
 interface HeaderTunerProps {
   isOn: boolean;
@@ -16,6 +16,7 @@ export function HeaderTuner({ isOn, onToggle, tunerData, isConnected }: HeaderTu
   };
 
   const centsPosition = ((tunerData.cents + 50) / 100) * 100;
+  const hasSignal = tunerData.clarity > 0.5;
 
   return (
     <button
@@ -61,7 +62,7 @@ export function HeaderTuner({ isOn, onToggle, tunerData, isConnected }: HeaderTu
           <div
             className="absolute inset-0 opacity-60"
             style={{
-              background: 'linear-gradient(90deg, hsl(45, 100%, 50%), hsl(142, 70%, 45%), hsl(0, 70%, 50%))',
+              background: 'linear-gradient(90deg, hsl(0, 70%, 50%), hsl(45, 100%, 50%), hsl(142, 70%, 45%), hsl(45, 100%, 50%), hsl(0, 70%, 50%))',
             }}
           />
           
@@ -69,7 +70,7 @@ export function HeaderTuner({ isOn, onToggle, tunerData, isConnected }: HeaderTu
           <div className="absolute left-1/2 top-0 w-0.5 h-full bg-white -translate-x-1/2 z-10" />
           
           {/* Position indicator */}
-          {isOn && isConnected && tunerData.note !== '-' && (
+          {isOn && isConnected && tunerData.note !== '-' && hasSignal && (
             <div
               className="absolute top-0 w-1.5 h-full bg-white rounded-full transition-all duration-75 z-20"
               style={{
@@ -83,10 +84,29 @@ export function HeaderTuner({ isOn, onToggle, tunerData, isConnected }: HeaderTu
         
         <div className="flex justify-between text-[8px] font-mono text-muted-foreground">
           <span>♭</span>
-          <span>{isOn && isConnected && tunerData.frequency > 0 ? `${tunerData.frequency.toFixed(0)}Hz` : '---'}</span>
+          <span>{isOn && isConnected && tunerData.frequency > 0 ? `${tunerData.frequency.toFixed(1)}Hz` : '---'}</span>
           <span>♯</span>
         </div>
       </div>
+
+      {/* Clarity indicator */}
+      {isOn && isConnected && (
+        <div className="flex flex-col items-center gap-0.5">
+          <div 
+            className="w-1 h-4 rounded-full overflow-hidden bg-muted"
+            title={`Clareza: ${Math.round(tunerData.clarity * 100)}%`}
+          >
+            <div 
+              className="w-full bg-primary transition-all duration-150"
+              style={{ 
+                height: `${tunerData.clarity * 100}%`,
+                marginTop: `${100 - tunerData.clarity * 100}%`,
+              }}
+            />
+          </div>
+          <span className="text-[6px] text-muted-foreground">SIG</span>
+        </div>
+      )}
     </button>
   );
 }
