@@ -40,10 +40,10 @@ export function StagePedal({ name, color, isOn, onToggle, params }: StagePedalPr
         <div
           className="w-4 h-4 rounded-full"
           style={{
-            backgroundColor: isOn ? 'hsl(142, 70%, 45%)' : 'hsl(0, 70%, 40%)',
-            boxShadow: isOn 
-              ? '0 0 15px hsl(142, 70%, 45%), 0 0 30px hsl(142, 70%, 45% / 0.5)' 
-              : '0 0 8px hsl(0, 70%, 40% / 0.5)',
+            backgroundColor: isOn ? 'hsl(var(--stage-active))' : 'hsl(var(--stage-danger))',
+            boxShadow: isOn
+              ? '0 0 15px hsl(var(--stage-active)), 0 0 30px hsl(var(--stage-active) / 0.5)'
+              : '0 0 10px hsl(var(--stage-danger) / 0.6)',
           }}
         />
 

@@ -8,7 +8,8 @@ export function VidalLogo() {
           style={{
             fontFamily: "'Inter', sans-serif",
             letterSpacing: '-0.03em',
-            background: 'linear-gradient(135deg, hsl(185, 100%, 50%) 0%, hsl(195, 100%, 60%) 50%, hsl(180, 100%, 45%) 100%)',
+            background:
+              'linear-gradient(135deg, hsl(var(--brand-cyan)) 0%, hsl(var(--brand-cyan-2)) 50%, hsl(var(--brand-cyan-3)) 100%)',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             backgroundClip: 'text',
@@ -17,21 +18,22 @@ export function VidalLogo() {
           ANDRÉ VIDAL
         </span>
       </div>
-      
+
       {/* Divider */}
-      <div 
+      <div
         className="w-px h-5"
         style={{
-          background: 'linear-gradient(180deg, transparent, hsl(185, 100%, 50% / 0.5), transparent)',
+          background:
+            'linear-gradient(180deg, transparent, hsl(var(--brand-cyan) / 0.5), transparent)',
         }}
       />
-      
+
       {/* Product Name */}
       <div className="flex flex-col leading-none">
-        <span 
+        <span
           className="text-[10px] font-medium tracking-[0.2em] uppercase"
           style={{
-            color: 'hsl(185, 60%, 60%)',
+            color: 'hsl(var(--brand-cyan-2))',
           }}
         >
           PEDALBOARD
@@ -47,10 +49,10 @@ export function VidalLogo() {
 export function VidalFooter() {
   return (
     <div className="flex items-center justify-center gap-3 text-xs text-muted-foreground py-4">
-      <span 
+      <span
         className="font-semibold"
         style={{
-          background: 'linear-gradient(135deg, hsl(185, 100%, 50%), hsl(195, 100%, 60%))',
+          background: 'linear-gradient(135deg, hsl(var(--brand-cyan)), hsl(var(--brand-cyan-2)))',
           WebkitBackgroundClip: 'text',
           WebkitTextFillColor: 'transparent',
           backgroundClip: 'text',

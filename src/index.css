@@ -36,6 +36,11 @@
 
     --radius: 0.75rem;
 
+    /* Brand */
+    --brand-cyan: 185 100% 50%;
+    --brand-cyan-2: 195 100% 60%;
+    --brand-cyan-3: 180 100% 45%;
+
     --stage-active: 142 70% 45%;
     --stage-inactive: 0 0% 25%;
     --stage-warning: 45 100% 50%;
