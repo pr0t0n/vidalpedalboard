@@ -1,5 +1,5 @@
 import { PedalCase } from '@/components/PedalCase';
-import { Knob } from '@/components/Knob';
+import { ParamSlider } from '@/components/ParamSlider';
 import { PedalParams } from '@/hooks/useAudioEngine';
 
 interface TremoloPedalProps {
@@ -13,32 +13,14 @@ export function TremoloPedal({ isOn, onToggle, params, onParamChange }: TremoloP
   return (
     <PedalCase
       name="TREMOLO"
-      subtitle="Amplitude"
+      subtitle="Modulation"
       color="hsl(var(--pedal-tremolo))"
       glowColor="hsl(var(--pedal-tremolo-glow))"
       isOn={isOn}
       onToggle={onToggle}
     >
-      <div className="flex gap-4">
-        <Knob
-          value={params.rate}
-          min={0.5}
-          max={20}
-          onChange={(v) => onParamChange('rate', v)}
-          label="Speed"
-          color="hsl(var(--pedal-tremolo))"
-          size="md"
-        />
-        <Knob
-          value={params.depth}
-          min={0}
-          max={1}
-          onChange={(v) => onParamChange('depth', v)}
-          label="Depth"
-          color="hsl(var(--pedal-tremolo))"
-          size="md"
-        />
-      </div>
+      <ParamSlider value={params.rate} min={0.1} max={20} onChange={(v) => onParamChange('rate', v)} label="Rate" color="hsl(var(--pedal-tremolo))" />
+      <ParamSlider value={params.depth} min={0} max={1} onChange={(v) => onParamChange('depth', v)} label="Depth" color="hsl(var(--pedal-tremolo))" />
     </PedalCase>
   );
 }
