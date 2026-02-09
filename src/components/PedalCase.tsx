@@ -26,7 +26,7 @@ export function PedalCase({
   return (
     <div
       className={cn(
-        'relative flex flex-col items-center gap-2 p-3 rounded-xl',
+        'relative flex flex-col items-center p-3 rounded-xl',
         'border border-metal-highlight/20',
         'transition-all duration-300 w-full max-w-[180px] mx-auto',
         className
@@ -39,7 +39,7 @@ export function PedalCase({
       }}
     >
       {/* LED indicator */}
-      <div className="flex items-center justify-center">
+      <div className="flex items-center justify-center mb-1">
         <div
           className="w-3 h-3 rounded-full transition-all duration-200 border border-black/30"
           style={{
@@ -52,7 +52,7 @@ export function PedalCase({
       </div>
       
       {/* Pedal name */}
-      <div className="text-center">
+      <div className="text-center mb-1">
         <h3
           className="font-mono font-bold text-xs tracking-wide leading-tight"
           style={{ color }}
@@ -66,13 +66,13 @@ export function PedalCase({
         )}
       </div>
       
-      {/* Controls area */}
-      <div className="w-full space-y-1.5 py-1">
+      {/* Controls area - flex-1 to push footswitch to bottom */}
+      <div className="w-full space-y-1.5 py-1 flex-1">
         {children}
       </div>
       
-      {/* Foot switch */}
-      <div className="mt-1">
+      {/* Foot switch - always at bottom */}
+      <div className="mt-auto pt-2">
         <FootSwitch isOn={isOn} onToggle={onToggle} size="lg" />
       </div>
     </div>
