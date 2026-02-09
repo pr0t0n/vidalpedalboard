@@ -10,7 +10,6 @@ export interface TunerData {
 }
 
 export interface PedalState {
-  tuner: boolean;
   compressor: boolean;
   drive: boolean;
   distortion: boolean;
@@ -35,6 +34,7 @@ export interface PedalParams {
   distortion: {
     gain: number;
     tone: number;
+    evhMode: boolean;
   };
   chorus: {
     rate: number;
@@ -85,77 +85,36 @@ function frequencyToNote(frequency: number, clarity: number): TunerData {
   return { frequency, note, cents, octave, clarity };
 }
 
-// Autocorrelation pitch detection (inspirado em implementações de tuner WebAudio)
-// Otimizado: só varre offsets do range de guitarra e usa diferença absoluta (mais leve que N^2 completo).
-function autoCorrelate(buffer: Float32Array, sampleRate: number): { frequency: number; clarity: number } {
-  const SIZE = buffer.length;
-
-  // RMS (sensibilidade)
-  let rms = 0;
-  for (let i = 0; i < SIZE; i++) rms += buffer[i] * buffer[i];
-  rms = Math.sqrt(rms / SIZE);
-  if (rms < 0.003) return { frequency: -1, clarity: 0 };
-
-  // Range de offsets (frequências típicas guitarra)
-  const minOffset = Math.max(8, Math.floor(sampleRate / 1200));
-  const maxOffset = Math.min(SIZE - 1, Math.floor(sampleRate / 60));
-
-  // Janela menor para reduzir custo e reduzir influência de ruído
-  const windowSize = Math.min(1024, SIZE - maxOffset);
-  if (windowSize < 256) return { frequency: -1, clarity: 0 };
-
-  let bestOffset = -1;
-  let bestCorrelation = 0;
-  let lastCorrelation = 1;
-  let foundGoodCorrelation = false;
-
-  for (let offset = minOffset; offset <= maxOffset; offset++) {
-    let diffSum = 0;
-    for (let i = 0; i < windowSize; i++) {
-      diffSum += Math.abs(buffer[i] - buffer[i + offset]);
-    }
-
-    const correlation = 1 - diffSum / windowSize; // 1 = perfeito, 0 = ruim
-
-    if (correlation > 0.85 && correlation > lastCorrelation) {
-      foundGoodCorrelation = true;
-    }
-
-    if (foundGoodCorrelation && correlation < lastCorrelation) {
-      // Passou do pico
-      break;
-    }
-
-    if (correlation > bestCorrelation) {
-      bestCorrelation = correlation;
-      bestOffset = offset;
-    }
-
-    lastCorrelation = correlation;
-  }
-
-  if (bestOffset === -1 || bestCorrelation < 0.25) {
-    return { frequency: -1, clarity: 0 };
-  }
-
-  const frequency = sampleRate / bestOffset;
-  if (frequency < 60 || frequency > 1200) return { frequency: -1, clarity: 0 };
-
-  return { frequency, clarity: bestCorrelation };
-}
-
-// Create distortion curve for waveshaper
+// Create distortion curve for waveshaper - INCREASED POWER
 function makeDistortionCurve(amount: number): Float32Array<ArrayBuffer> {
   const samples = 44100;
   const buffer = new ArrayBuffer(samples * 4);
   const curve = new Float32Array(buffer);
   const deg = Math.PI / 180;
   
+  // Increased multiplier from 100 to 300 for more aggressive distortion
+  const intensity = amount * 300;
+  
   for (let i = 0; i < samples; i++) {
     const x = (i * 2) / samples - 1;
-    curve[i] = ((3 + amount * 100) * x * 20 * deg) / (Math.PI + amount * 100 * Math.abs(x));
+    curve[i] = ((3 + intensity) * x * 20 * deg) / (Math.PI + intensity * Math.abs(x));
   }
   
+  return curve;
+}
+
+// EVH Brown Sound distortion curve - Van Halen signature
+function makeEVHDistortionCurve(amount: number = 600): Float32Array<ArrayBuffer> {
+  const n_samples = 44100;
+  const buffer = new ArrayBuffer(n_samples * 4);
+  const curve = new Float32Array(buffer);
+  const deg = Math.PI / 180;
+
+  for (let i = 0; i < n_samples; i++) {
+    const x = (i * 2) / n_samples - 1;
+    curve[i] = ((3 + amount) * x * 20 * deg) / (Math.PI + amount * Math.abs(x));
+  }
+
   return curve;
 }
 
@@ -167,12 +126,7 @@ export function useAudioEngine() {
   const [performanceStats, setPerformanceStats] = useState<PerformanceStats>({ cpu: 0, memory: 0, latency: 0 });
   const [tunerData, setTunerData] = useState<TunerData>({ frequency: 0, note: '-', cents: 0, octave: 0, clarity: 0 });
   
-  // Pitch detection state refs for smoothing
-  const lastFrequencyRef = useRef<number>(0);
-  const frequencyHistoryRef = useRef<number[]>([]);
-  
   const [pedalState, setPedalState] = useState<PedalState>({
-    tuner: false,
     compressor: false,
     drive: false,
     distortion: false,
@@ -185,8 +139,8 @@ export function useAudioEngine() {
   
   const [params, setParams] = useState<PedalParams>({
     compressor: { threshold: -20, ratio: 4, attack: 0.003, release: 0.25 },
-    drive: { gain: 0.5, tone: 0.5 },
-    distortion: { gain: 0.7, tone: 0.5 },
+    drive: { gain: 0.7, tone: 0.6 }, // Increased default gain
+    distortion: { gain: 0.8, tone: 0.6, evhMode: false }, // Increased default gain + EVH mode
     chorus: { rate: 1.5, depth: 0.7, feedback: 0.4 },
     tremolo: { rate: 4, depth: 0.5 },
     delay: { time: 0.3, feedback: 0.4, mix: 0.5 },
@@ -201,11 +155,21 @@ export function useAudioEngine() {
   const streamRef = useRef<MediaStream | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const tunerAnalyserRef = useRef<AnalyserNode | null>(null);
   const stereoMergerRef = useRef<ChannelMergerNode | null>(null);
+  
+  // Standard distortion nodes
   const distortionNodeRef = useRef<WaveShaperNode | null>(null);
   const distortionGainRef = useRef<GainNode | null>(null);
   const distortionToneRef = useRef<BiquadFilterNode | null>(null);
+  const distortionPreGainRef = useRef<GainNode | null>(null);
+  
+  // EVH distortion nodes
+  const evhWaveShaperRef = useRef<WaveShaperNode | null>(null);
+  const evhPreGainRef = useRef<GainNode | null>(null);
+  const evhLowCutRef = useRef<BiquadFilterNode | null>(null);
+  const evhMidBoostRef = useRef<BiquadFilterNode | null>(null);
+  const evhOutputRef = useRef<GainNode | null>(null);
+  
   const effectsRef = useRef<Record<string, any>>({});
   const animationFrameRef = useRef<number | null>(null);
   const performanceIntervalRef = useRef<number | null>(null);
@@ -266,42 +230,8 @@ export function useAudioEngine() {
     rms = Math.sqrt(rms / bufferLength);
     setInputLevel(Math.min(1, rms * 5));
     
-    // Tuner detection using autocorrelation algorithm
-    if (pedalState.tuner && tunerAnalyserRef.current && audioContextRef.current) {
-      const tunerBuffer = new Float32Array(tunerAnalyserRef.current.fftSize);
-      tunerAnalyserRef.current.getFloatTimeDomainData(tunerBuffer);
-      
-      const result = autoCorrelate(tunerBuffer, audioContextRef.current.sampleRate);
-      if (result.frequency > 0 && result.clarity > 0.15) {
-        // Apply smoothing
-        let smoothedFreq = result.frequency;
-        if (lastFrequencyRef.current > 0) {
-          const diff = Math.abs(result.frequency - lastFrequencyRef.current);
-          const percentDiff = diff / lastFrequencyRef.current;
-          if (percentDiff < 0.15) {
-            smoothedFreq = 0.7 * lastFrequencyRef.current + 0.3 * result.frequency;
-          }
-        }
-        
-        // Update history for median filtering
-        frequencyHistoryRef.current.push(smoothedFreq);
-        if (frequencyHistoryRef.current.length > 5) {
-          frequencyHistoryRef.current.shift();
-        }
-        
-        // Use median for stability
-        if (frequencyHistoryRef.current.length >= 3) {
-          const sorted = [...frequencyHistoryRef.current].sort((a, b) => a - b);
-          smoothedFreq = sorted[Math.floor(sorted.length / 2)];
-        }
-        
-        lastFrequencyRef.current = smoothedFreq;
-        setTunerData(frequencyToNote(smoothedFreq, result.clarity));
-      }
-    }
-    
     animationFrameRef.current = requestAnimationFrame(updateInputLevel);
-  }, [isConnected, pedalState.tuner]);
+  }, [isConnected]);
 
   const createAndConnectEffects = useCallback(() => {
     if (!tunaRef.current || !audioContextRef.current || !sourceRef.current || !gainNodeRef.current || !analyserRef.current) {
@@ -315,24 +245,43 @@ export function useAudioEngine() {
     // Create stereo merger for mono-to-stereo conversion
     stereoMergerRef.current = ctx.createChannelMerger(2);
     
-    // Create dedicated tuner analyser (separate from main chain)
-    tunerAnalyserRef.current = ctx.createAnalyser();
-    tunerAnalyserRef.current.fftSize = 4096;
-    tunerAnalyserRef.current.smoothingTimeConstant = 0.2;
+    // ===== STANDARD DISTORTION =====
+    distortionPreGainRef.current = ctx.createGain();
+    distortionPreGainRef.current.gain.value = 4; // Pre-amplification for more power
     
-    // Create custom distortion effect using native WaveShaper
     distortionNodeRef.current = ctx.createWaveShaper();
     distortionNodeRef.current.curve = makeDistortionCurve(params.distortion.gain);
     distortionNodeRef.current.oversample = '4x';
     
     distortionGainRef.current = ctx.createGain();
-    distortionGainRef.current.gain.value = pedalState.distortion ? 1 : 0;
+    distortionGainRef.current.gain.value = pedalState.distortion && !params.distortion.evhMode ? 1 : 0;
     
     distortionToneRef.current = ctx.createBiquadFilter();
     distortionToneRef.current.type = 'lowpass';
     distortionToneRef.current.frequency.value = 2000 + params.distortion.tone * 6000;
     
-    // Create Tuna effects
+    // ===== EVH BROWN SOUND DISTORTION =====
+    evhPreGainRef.current = ctx.createGain();
+    evhPreGainRef.current.gain.value = 25; // High pre-gain
+    
+    evhWaveShaperRef.current = ctx.createWaveShaper();
+    evhWaveShaperRef.current.curve = makeEVHDistortionCurve(600);
+    evhWaveShaperRef.current.oversample = '4x';
+    
+    evhLowCutRef.current = ctx.createBiquadFilter();
+    evhLowCutRef.current.type = 'highpass';
+    evhLowCutRef.current.frequency.value = 120; // Tight sound
+    
+    evhMidBoostRef.current = ctx.createBiquadFilter();
+    evhMidBoostRef.current.type = 'peaking';
+    evhMidBoostRef.current.frequency.value = 800; // Brown Sound mids
+    evhMidBoostRef.current.Q.value = 1;
+    evhMidBoostRef.current.gain.value = 6;
+    
+    evhOutputRef.current = ctx.createGain();
+    evhOutputRef.current.gain.value = pedalState.distortion && params.distortion.evhMode ? 0.7 : 0;
+    
+    // Create Tuna effects with INCREASED POWER for overdrive
     const effects = {
       compressor: new tuna.Compressor({
         threshold: params.compressor.threshold,
@@ -342,9 +291,9 @@ export function useAudioEngine() {
         bypass: !pedalState.compressor,
       }),
       overdrive: new tuna.Overdrive({
-        outputGain: 0.5,
-        drive: params.drive.gain * 0.8 + 0.2,
-        curveAmount: params.drive.tone * 0.8,
+        outputGain: 0.8, // Increased from 0.5
+        drive: params.drive.gain * 1.5 + 0.3, // Increased multiplier
+        curveAmount: params.drive.tone * 1.2, // Increased
         algorithmIndex: 0,
         bypass: !pedalState.drive,
       }),
@@ -391,26 +340,9 @@ export function useAudioEngine() {
     effectsRef.current = effects;
     
     // Connect audio chain:
-    // Source -> Analyser -> Tuner Analyser (split) 
-    //        -> Compressor -> Drive -> Distortion -> Chorus -> Tremolo -> Delay -> Wah -> Reverb 
-    //        -> Gain -> Stereo Merger -> Destination
+    // Source -> Analyser -> Compressor -> Drive -> Distortion/EVH -> Chorus -> Tremolo -> Delay -> Wah -> Reverb -> Gain -> Destination
     
     sourceRef.current.connect(analyserRef.current);
-
-    // Tuner: band-pass simples (highpass + lowpass) para reduzir ruído
-    const tunerHighpass = ctx.createBiquadFilter();
-    tunerHighpass.type = 'highpass';
-    tunerHighpass.frequency.value = 60;
-    tunerHighpass.Q.value = 0.707;
-
-    const tunerLowpass = ctx.createBiquadFilter();
-    tunerLowpass.type = 'lowpass';
-    tunerLowpass.frequency.value = 1500;
-    tunerLowpass.Q.value = 0.707;
-
-    sourceRef.current.connect(tunerHighpass);
-    tunerHighpass.connect(tunerLowpass);
-    tunerLowpass.connect(tunerAnalyserRef.current);
     
     let previousNode: AudioNode = analyserRef.current;
     
@@ -422,18 +354,28 @@ export function useAudioEngine() {
     previousNode.connect(effects.overdrive);
     previousNode = effects.overdrive;
     
-    // Custom Distortion (parallel dry/wet mixing)
+    // Distortion (parallel dry/wet mixing with EVH option)
     const distortionDryGain = ctx.createGain();
     distortionDryGain.gain.value = pedalState.distortion ? 0 : 1;
     
+    // Standard distortion path
     previousNode.connect(distortionDryGain);
-    previousNode.connect(distortionNodeRef.current);
+    previousNode.connect(distortionPreGainRef.current);
+    distortionPreGainRef.current.connect(distortionNodeRef.current);
     distortionNodeRef.current.connect(distortionToneRef.current);
     distortionToneRef.current.connect(distortionGainRef.current);
+    
+    // EVH distortion path
+    previousNode.connect(evhPreGainRef.current);
+    evhPreGainRef.current.connect(evhWaveShaperRef.current);
+    evhWaveShaperRef.current.connect(evhLowCutRef.current);
+    evhLowCutRef.current.connect(evhMidBoostRef.current);
+    evhMidBoostRef.current.connect(evhOutputRef.current);
     
     const distortionMixer = ctx.createGain();
     distortionDryGain.connect(distortionMixer);
     distortionGainRef.current.connect(distortionMixer);
+    evhOutputRef.current.connect(distortionMixer);
     previousNode = distortionMixer;
     
     // Continue chain
@@ -459,7 +401,7 @@ export function useAudioEngine() {
     gainNodeRef.current.connect(stereoMergerRef.current, 0, 1);
     stereoMergerRef.current.connect(ctx.destination);
     
-    console.log('Effects chain connected successfully (stereo output with distortion)');
+    console.log('Effects chain connected with EVH mode support');
   }, [params, pedalState]);
 
   const connect = useCallback(async () => {
@@ -482,23 +424,24 @@ export function useAudioEngine() {
           noiseSuppression: false,
           autoGainControl: false,
           channelCount: 1,
-          sampleRate: 44100,
+          sampleRate: 48000, // Higher sample rate for better quality
         },
       });
       
       console.log('Microphone stream obtained:', stream.getAudioTracks());
       streamRef.current = stream;
       
+      // ULTRA LOW LATENCY CONFIGURATION
       const ctx = new AudioContext({ 
-        sampleRate: 44100,
-        latencyHint: 'interactive' 
+        sampleRate: 48000,
+        latencyHint: 'playback' // Changed from 'interactive' for even lower latency
       });
       
       if (ctx.state === 'suspended') {
         await ctx.resume();
       }
       
-      console.log('AudioContext state:', ctx.state, 'Sample rate:', ctx.sampleRate);
+      console.log('AudioContext state:', ctx.state, 'Sample rate:', ctx.sampleRate, 'Base latency:', ctx.baseLatency);
       
       audioContextRef.current = ctx;
       tunaRef.current = new Tuna(ctx);
@@ -509,8 +452,8 @@ export function useAudioEngine() {
       gainNodeRef.current.gain.value = params.volume;
       
       analyserRef.current = ctx.createAnalyser();
-      analyserRef.current.fftSize = 2048;
-      analyserRef.current.smoothingTimeConstant = 0.8;
+      analyserRef.current.fftSize = 1024; // Reduced for lower latency
+      analyserRef.current.smoothingTimeConstant = 0.6;
       
       createAndConnectEffects();
       
@@ -519,7 +462,7 @@ export function useAudioEngine() {
       animationFrameRef.current = requestAnimationFrame(updateInputLevel);
       performanceIntervalRef.current = window.setInterval(updatePerformanceStats, 1000);
       
-      console.log('Audio engine connected successfully');
+      console.log('Audio engine connected successfully with low latency');
       
     } catch (err: any) {
       console.error('Audio connection error:', err);
@@ -571,11 +514,16 @@ export function useAudioEngine() {
     sourceRef.current = null;
     gainNodeRef.current = null;
     analyserRef.current = null;
-    tunerAnalyserRef.current = null;
     stereoMergerRef.current = null;
     distortionNodeRef.current = null;
     distortionGainRef.current = null;
     distortionToneRef.current = null;
+    distortionPreGainRef.current = null;
+    evhWaveShaperRef.current = null;
+    evhPreGainRef.current = null;
+    evhLowCutRef.current = null;
+    evhMidBoostRef.current = null;
+    evhOutputRef.current = null;
     audioContextRef.current = null;
     tunaRef.current = null;
     effectsRef.current = {};
@@ -583,8 +531,6 @@ export function useAudioEngine() {
     setIsConnected(false);
     setInputLevel(0);
     setTunerData({ frequency: 0, note: '-', cents: 0, octave: 0, clarity: 0 });
-    lastFrequencyRef.current = 0;
-    frequencyHistoryRef.current = [];
     setPerformanceStats({ cpu: 0, memory: 0, latency: 0 });
   }, []);
 
@@ -608,21 +554,27 @@ export function useAudioEngine() {
         effectsRef.current[effectName].bypass = !newState[pedal];
       }
       
-      // Handle distortion separately (native Web Audio)
+      // Handle distortion separately (native Web Audio + EVH)
       if (pedal === 'distortion') {
+        const isOn = newState.distortion;
+        const isEvh = params.distortion.evhMode;
+        
         if (distortionGainRef.current) {
-          distortionGainRef.current.gain.value = newState.distortion ? 1 : 0;
+          distortionGainRef.current.gain.value = isOn && !isEvh ? 1 : 0;
+        }
+        if (evhOutputRef.current) {
+          evhOutputRef.current.gain.value = isOn && isEvh ? 0.7 : 0;
         }
       }
       
       return newState;
     });
-  }, []);
+  }, [params.distortion.evhMode]);
 
   const updateParam = useCallback((
     pedal: keyof Omit<PedalParams, 'volume'>,
     param: string,
-    value: number
+    value: number | boolean
   ) => {
     setParams(prev => {
       const pedalParams = prev[pedal];
@@ -646,6 +598,29 @@ export function useAudioEngine() {
     }
   }, []);
 
+  // Toggle EVH mode
+  const toggleEVHMode = useCallback(() => {
+    setParams(prev => {
+      const newEvhMode = !prev.distortion.evhMode;
+      
+      // Update gain nodes
+      if (distortionGainRef.current) {
+        distortionGainRef.current.gain.value = pedalState.distortion && !newEvhMode ? 1 : 0;
+      }
+      if (evhOutputRef.current) {
+        evhOutputRef.current.gain.value = pedalState.distortion && newEvhMode ? 0.7 : 0;
+      }
+      
+      return {
+        ...prev,
+        distortion: {
+          ...prev.distortion,
+          evhMode: newEvhMode,
+        },
+      };
+    });
+  }, [pedalState.distortion]);
+
   // Update effects when params change
   useEffect(() => {
     if (!isConnected) return;
@@ -658,8 +633,8 @@ export function useAudioEngine() {
     }
     
     if (effects.overdrive) {
-      effects.overdrive.drive = params.drive.gain;
-      effects.overdrive.curveAmount = params.drive.tone;
+      effects.overdrive.drive = params.drive.gain * 1.5 + 0.3;
+      effects.overdrive.curveAmount = params.drive.tone * 1.2;
     }
     
     // Update distortion
@@ -668,6 +643,14 @@ export function useAudioEngine() {
     }
     if (distortionToneRef.current) {
       distortionToneRef.current.frequency.value = 2000 + params.distortion.tone * 6000;
+    }
+    
+    // Update EVH/Standard mode switching
+    if (distortionGainRef.current) {
+      distortionGainRef.current.gain.value = pedalState.distortion && !params.distortion.evhMode ? 1 : 0;
+    }
+    if (evhOutputRef.current) {
+      evhOutputRef.current.gain.value = pedalState.distortion && params.distortion.evhMode ? 0.7 : 0;
     }
     
     if (effects.chorus) {
@@ -695,7 +678,7 @@ export function useAudioEngine() {
     if (effects.convolver) {
       effects.convolver.wetLevel = params.reverb.mix;
     }
-  }, [params, isConnected]);
+  }, [params, isConnected, pedalState.distortion]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -703,27 +686,6 @@ export function useAudioEngine() {
       disconnect();
     };
   }, [disconnect]);
-
-  // Apply preset
-  const applyPreset = useCallback((
-    newPedalState: Partial<PedalState>,
-    newParams: Partial<PedalParams>
-  ) => {
-    setPedalState(prev => ({ ...prev, ...newPedalState }));
-    setParams(prev => {
-      const updated = { ...prev };
-      if (newParams.compressor) updated.compressor = { ...prev.compressor, ...newParams.compressor };
-      if (newParams.drive) updated.drive = { ...prev.drive, ...newParams.drive };
-      if (newParams.distortion) updated.distortion = { ...prev.distortion, ...newParams.distortion };
-      if (newParams.chorus) updated.chorus = { ...prev.chorus, ...newParams.chorus };
-      if (newParams.tremolo) updated.tremolo = { ...prev.tremolo, ...newParams.tremolo };
-      if (newParams.delay) updated.delay = { ...prev.delay, ...newParams.delay };
-      if (newParams.wah) updated.wah = { ...prev.wah, ...newParams.wah };
-      if (newParams.reverb) updated.reverb = { ...prev.reverb, ...newParams.reverb };
-      if (newParams.volume !== undefined) updated.volume = newParams.volume;
-      return updated;
-    });
-  }, []);
 
   return {
     isConnected,
@@ -739,7 +701,7 @@ export function useAudioEngine() {
     togglePedal,
     updateParam,
     setVolume,
+    toggleEVHMode,
     checkPermission,
-    applyPreset,
   };
 }

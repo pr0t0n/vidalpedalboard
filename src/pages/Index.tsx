@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { useAudioEngine } from '@/hooks/useAudioEngine';
 import { CompressorPedal } from '@/components/pedals/CompressorPedal';
 import { DrivePedal } from '@/components/pedals/DrivePedal';
@@ -7,11 +8,8 @@ import { TremoloPedal } from '@/components/pedals/TremoloPedal';
 import { DelayPedal } from '@/components/pedals/DelayPedal';
 import { WahPedal } from '@/components/pedals/WahPedal';
 import { ReverbPedal } from '@/components/pedals/ReverbPedal';
-import { Metronome } from '@/components/Metronome';
-import { VolumeMaster } from '@/components/VolumeMaster';
 import { VidalLogo, VidalFooter } from '@/components/VidalLogo';
-import { HeaderTuner } from '@/components/HeaderTuner';
-import { AlertCircle, Mic, MicOff, Cpu, HardDrive, Clock, Volume2 } from 'lucide-react';
+import { AlertCircle, Mic, MicOff, Cpu, HardDrive, Clock, Volume2, Settings } from 'lucide-react';
 
 const Index = () => {
   const {
@@ -19,7 +17,6 @@ const Index = () => {
     isLoading,
     error,
     inputLevel,
-    tunerData,
     pedalState,
     params,
     performanceStats,
@@ -28,6 +25,7 @@ const Index = () => {
     togglePedal,
     updateParam,
     setVolume,
+    toggleEVHMode,
   } = useAudioEngine();
 
   return (
@@ -76,14 +74,6 @@ const Index = () => {
             </span>
           </div>
 
-          {/* Tuner in Header */}
-          <HeaderTuner
-            isOn={pedalState.tuner}
-            onToggle={() => togglePedal('tuner')}
-            tunerData={tunerData}
-            isConnected={isConnected}
-          />
-
           {/* Volume Control */}
           <div className="flex items-center gap-2">
             <Volume2 className="w-4 h-4 text-muted-foreground" />
@@ -119,6 +109,15 @@ const Index = () => {
             </div>
           </div>
 
+          {/* Pedal Manager Link */}
+          <Link
+            to="/pedals"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors"
+          >
+            <Settings className="w-4 h-4" />
+            <span className="text-xs font-medium">Gerenciar Pedais</span>
+          </Link>
+
           {/* Connection Status */}
           <div className="flex items-center gap-2">
             <div
@@ -153,7 +152,9 @@ const Index = () => {
           <span>→</span>
           <span className={pedalState.drive ? 'text-[hsl(var(--pedal-drive))]' : ''}>DRIVE</span>
           <span>→</span>
-          <span className={pedalState.distortion ? 'text-[hsl(var(--pedal-distortion))]' : ''}>DIST</span>
+          <span className={pedalState.distortion ? (params.distortion.evhMode ? 'text-yellow-400' : 'text-[hsl(var(--pedal-distortion))]') : ''}>
+            {params.distortion.evhMode ? 'EVH' : 'DIST'}
+          </span>
           <span>→</span>
           <span className={pedalState.chorus ? 'text-[hsl(var(--pedal-chorus))]' : ''}>CHORUS</span>
           <span>→</span>
@@ -169,7 +170,7 @@ const Index = () => {
         </div>
 
         {/* Pedals Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
           <CompressorPedal
             isOn={pedalState.compressor}
             onToggle={() => togglePedal('compressor')}
@@ -187,6 +188,7 @@ const Index = () => {
             onToggle={() => togglePedal('distortion')}
             params={params.distortion}
             onParamChange={(param, value) => updateParam('distortion', param, value)}
+            onToggleEVH={toggleEVHMode}
           />
           <ChorusPedal
             isOn={pedalState.chorus}
@@ -217,16 +219,6 @@ const Index = () => {
             onToggle={() => togglePedal('reverb')}
             params={params.reverb}
             onParamChange={(param, value) => updateParam('reverb', param, value)}
-          />
-        </div>
-
-        {/* Bottom Controls */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Metronome />
-          <VolumeMaster
-            volume={params.volume}
-            onVolumeChange={setVolume}
-            isConnected={isConnected}
           />
         </div>
       </main>
