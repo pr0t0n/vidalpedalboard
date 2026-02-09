@@ -1,0 +1,1 @@
+ALTER TABLE public.profiles ADD COLUMN pedal_order jsonb NOT NULL DEFAULT '[]'::jsonb;
