@@ -56,6 +56,7 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
   const { isActive: wakeLockActive, request: requestWakeLock } = useWakeLock();
 
   const [customPedals, setCustomPedals] = useState<CustomPedalDB[]>([]);
+  const [customPedalStates, setCustomPedalStates] = useState<Record<string, boolean>>({});
   const [showPresets, setShowPresets] = useState(false);
   const [newPresetName, setNewPresetName] = useState('');
   const [pedalOrder, setPedalOrder] = useState<string[]>(DEFAULT_ORDER);
@@ -249,14 +250,15 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
     }
 
     if (customPedal) {
+      const isOn = customPedalStates[customPedal.id] ?? false;
       return wrapWithArrows(
         <PedalCase
           name={customPedal.name}
           subtitle={customPedal.subtitle || undefined}
           color={customPedal.color}
           glowColor={customPedal.glow_color}
-          isOn={false}
-          onToggle={() => {}}
+          isOn={isOn}
+          onToggle={() => setCustomPedalStates(prev => ({ ...prev, [customPedal.id]: !prev[customPedal.id] }))}
         >
           <div className="text-[8px] text-center text-muted-foreground py-2">
             Custom Pedal
