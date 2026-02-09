@@ -23,60 +23,64 @@ export function useAuth() {
   });
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        // Fetch profile and role
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('user_id', session.user.id)
-          .maybeSingle();
+    let isMounted = true;
 
-        const { data: roles } = await supabase
-          .from('user_roles')
-          .select('role')
-          .eq('user_id', session.user.id);
+    const fetchUserData = async (userId: string) => {
+      const [{ data: profile }, { data: roles }] = await Promise.all([
+        supabase.from('profiles').select('*').eq('user_id', userId).maybeSingle(),
+        supabase.from('user_roles').select('role').eq('user_id', userId),
+      ]);
+      const isAdmin = roles?.some((r: any) => r.role === 'admin') || false;
+      return { profile: profile as UserProfile | null, isAdmin };
+    };
 
-        const isAdmin = roles?.some((r: any) => r.role === 'admin') || false;
+    // Listener for ONGOING auth changes (does NOT control isLoading)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (!isMounted) return;
 
-        setState({
-          user: session.user,
-          profile: profile as UserProfile | null,
-          isAdmin,
-          isLoading: false,
-        });
-      } else {
-        setState({ user: null, profile: null, isAdmin: false, isLoading: false });
+        if (session?.user) {
+          // Fire and forget - don't set loading
+          fetchUserData(session.user.id).then(({ profile, isAdmin }) => {
+            if (isMounted) {
+              setState({ user: session.user, profile, isAdmin, isLoading: false });
+            }
+          });
+        } else {
+          setState({ user: null, profile: null, isAdmin: false, isLoading: false });
+        }
       }
-    });
+    );
 
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('user_id', session.user.id)
-          .maybeSingle();
+    // INITIAL load (controls isLoading)
+    const initializeAuth = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!isMounted) return;
 
-        const { data: roles } = await supabase
-          .from('user_roles')
-          .select('role')
-          .eq('user_id', session.user.id);
-
-        const isAdmin = roles?.some((r: any) => r.role === 'admin') || false;
-
-        setState({
-          user: session.user,
-          profile: profile as UserProfile | null,
-          isAdmin,
-          isLoading: false,
-        });
-      } else {
-        setState(prev => ({ ...prev, isLoading: false }));
+        if (session?.user) {
+          const { profile, isAdmin } = await fetchUserData(session.user.id);
+          if (isMounted) {
+            setState({ user: session.user, profile, isAdmin, isLoading: false });
+          }
+        } else {
+          if (isMounted) {
+            setState({ user: null, profile: null, isAdmin: false, isLoading: false });
+          }
+        }
+      } catch {
+        if (isMounted) {
+          setState({ user: null, profile: null, isAdmin: false, isLoading: false });
+        }
       }
-    });
+    };
 
-    return () => subscription.unsubscribe();
+    initializeAuth();
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
