@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { useAudioEngine } from '@/hooks/useAudioEngine';
+import { useAudioEngine, PedalState } from '@/hooks/useAudioEngine';
 import { useAuth } from '@/hooks/useAuth';
 import { usePresets } from '@/hooks/usePresets';
 import { useWakeLock } from '@/hooks/useWakeLock';
@@ -13,12 +13,11 @@ import { DelayPedal } from '@/components/pedals/DelayPedal';
 import { WahPedal } from '@/components/pedals/WahPedal';
 import { ReverbPedal } from '@/components/pedals/ReverbPedal';
 import { PedalCase } from '@/components/PedalCase';
-import { ParamSlider } from '@/components/ParamSlider';
 import { VidalLogo } from '@/components/VidalLogo';
 import { supabase } from '@/integrations/supabase/client';
 import {
   AlertCircle, Mic, MicOff, Volume2, Settings, LogOut, Shield,
-  Save, FolderOpen, Trash2, Sun, Moon
+  Save, FolderOpen, Trash2, ChevronLeft, ChevronRight, ArrowLeftRight
 } from 'lucide-react';
 
 interface IndexProps {
@@ -38,8 +37,15 @@ interface CustomPedalDB {
   code: string;
 }
 
+// Optimal signal chain order for default
+const DEFAULT_ORDER = [
+  'compressor', 'drive', 'distortion', 'chorus', 'tremolo', 'wah', 'delay', 'reverb'
+];
+
+const BUILTIN_PEDAL_IDS = new Set(DEFAULT_ORDER);
+
 const Index = ({ onSignOut, isAdmin }: IndexProps) => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const {
     isConnected, isLoading, error, inputLevel,
     pedalState, params, connect, disconnect,
@@ -52,6 +58,8 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
   const [customPedals, setCustomPedals] = useState<CustomPedalDB[]>([]);
   const [showPresets, setShowPresets] = useState(false);
   const [newPresetName, setNewPresetName] = useState('');
+  const [pedalOrder, setPedalOrder] = useState<string[]>(DEFAULT_ORDER);
+  const [editingOrder, setEditingOrder] = useState(false);
 
   // Fetch custom pedals from DB
   const fetchCustomPedals = useCallback(async () => {
@@ -65,7 +73,38 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
     if (data) setCustomPedals(data as unknown as CustomPedalDB[]);
   }, [user]);
 
+  // Load pedal order from profile
+  useEffect(() => {
+    if (profile) {
+      const loadOrder = async () => {
+        const { data } = await supabase
+          .from('profiles')
+          .select('pedal_order')
+          .eq('user_id', profile.user_id)
+          .maybeSingle();
+        if (data?.pedal_order && Array.isArray(data.pedal_order) && data.pedal_order.length > 0) {
+          setPedalOrder(data.pedal_order as string[]);
+        }
+      };
+      loadOrder();
+    }
+  }, [profile]);
+
   useEffect(() => { fetchCustomPedals(); }, [fetchCustomPedals]);
+
+  // Build full order including custom pedals not yet in order
+  useEffect(() => {
+    if (customPedals.length > 0) {
+      setPedalOrder(prev => {
+        const existingIds = new Set(prev);
+        const newCustomIds = customPedals
+          .filter(cp => !existingIds.has(cp.id))
+          .map(cp => cp.id);
+        if (newCustomIds.length === 0) return prev;
+        return [...prev, ...newCustomIds];
+      });
+    }
+  }, [customPedals]);
 
   // Request wake lock on connect
   useEffect(() => {
@@ -73,6 +112,26 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
       requestWakeLock();
     }
   }, [isConnected, wakeLockActive, requestWakeLock]);
+
+  // Save order to DB
+  const saveOrder = useCallback(async (newOrder: string[]) => {
+    setPedalOrder(newOrder);
+    if (user) {
+      await supabase
+        .from('profiles')
+        .update({ pedal_order: newOrder as any })
+        .eq('user_id', user.id);
+    }
+  }, [user]);
+
+  // Move pedal left/right
+  const movePedal = useCallback((index: number, direction: -1 | 1) => {
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= pedalOrder.length) return;
+    const newOrder = [...pedalOrder];
+    [newOrder[index], newOrder[newIndex]] = [newOrder[newIndex], newOrder[index]];
+    saveOrder(newOrder);
+  }, [pedalOrder, saveOrder]);
 
   // Save preset handler
   const handleSavePreset = async () => {
@@ -84,7 +143,6 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
   // Load preset handler
   const handleLoadPreset = async (preset: any) => {
     await activatePreset(preset.id);
-    // Apply preset values to audio engine
     if (preset.pedal_states) {
       Object.entries(preset.pedal_states).forEach(([key, value]) => {
         if (value !== pedalState[key as keyof typeof pedalState]) {
@@ -108,8 +166,107 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
     setShowPresets(false);
   };
 
-  // Custom pedals to show after standard ones (up to fill 8 total slots, but allow overflow)
-  const visibleCustomPedals = customPedals;
+  // Render a pedal by its ID
+  const renderPedal = (pedalId: string, index: number) => {
+    const isBuiltin = BUILTIN_PEDAL_IDS.has(pedalId);
+    const customPedal = !isBuiltin ? customPedals.find(cp => cp.id === pedalId) : null;
+
+    // Skip if custom pedal no longer exists
+    if (!isBuiltin && !customPedal) return null;
+
+    const arrows = editingOrder ? (
+      <div className="flex items-center justify-center gap-1 w-full">
+        <button
+          onClick={(e) => { e.stopPropagation(); movePedal(index, -1); }}
+          disabled={index === 0}
+          className="p-1.5 rounded-md bg-muted/80 hover:bg-muted text-foreground disabled:opacity-20 active:scale-90 touch-manipulation transition-all"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+        <span className="text-[9px] font-mono text-muted-foreground w-4 text-center">{index + 1}</span>
+        <button
+          onClick={(e) => { e.stopPropagation(); movePedal(index, 1); }}
+          disabled={index === pedalOrder.length - 1}
+          className="p-1.5 rounded-md bg-muted/80 hover:bg-muted text-foreground disabled:opacity-20 active:scale-90 touch-manipulation transition-all"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+    ) : null;
+
+    const wrapWithArrows = (content: React.ReactNode) => (
+      <div key={pedalId} className="flex flex-col gap-1">
+        {arrows}
+        {content}
+      </div>
+    );
+
+    if (isBuiltin) {
+      switch (pedalId) {
+        case 'compressor':
+          return wrapWithArrows(
+            <CompressorPedal isOn={pedalState.compressor} onToggle={() => togglePedal('compressor')}
+              params={params.compressor} onParamChange={(p, v) => updateParam('compressor', p, v)} />
+          );
+        case 'drive':
+          return wrapWithArrows(
+            <DrivePedal isOn={pedalState.drive} onToggle={() => togglePedal('drive')}
+              params={params.drive} onParamChange={(p, v) => updateParam('drive', p, v)} />
+          );
+        case 'distortion':
+          return wrapWithArrows(
+            <DistortionPedal isOn={pedalState.distortion} onToggle={() => togglePedal('distortion')}
+              params={params.distortion} onParamChange={(p, v) => updateParam('distortion', p, v)} />
+          );
+        case 'chorus':
+          return wrapWithArrows(
+            <ChorusPedal isOn={pedalState.chorus} onToggle={() => togglePedal('chorus')}
+              params={params.chorus} onParamChange={(p, v) => updateParam('chorus', p, v)} />
+          );
+        case 'tremolo':
+          return wrapWithArrows(
+            <TremoloPedal isOn={pedalState.tremolo} onToggle={() => togglePedal('tremolo')}
+              params={params.tremolo} onParamChange={(p, v) => updateParam('tremolo', p, v)} />
+          );
+        case 'delay':
+          return wrapWithArrows(
+            <DelayPedal isOn={pedalState.delay} onToggle={() => togglePedal('delay')}
+              params={params.delay} onParamChange={(p, v) => updateParam('delay', p, v)} />
+          );
+        case 'wah':
+          return wrapWithArrows(
+            <WahPedal isOn={pedalState.wah} onToggle={() => togglePedal('wah')}
+              params={params.wah} onParamChange={(p, v) => updateParam('wah', p, v)} />
+          );
+        case 'reverb':
+          return wrapWithArrows(
+            <ReverbPedal isOn={pedalState.reverb} onToggle={() => togglePedal('reverb')}
+              params={params.reverb} onParamChange={(p, v) => updateParam('reverb', p, v)} />
+          );
+        default:
+          return null;
+      }
+    }
+
+    if (customPedal) {
+      return wrapWithArrows(
+        <PedalCase
+          name={customPedal.name}
+          subtitle={customPedal.subtitle || undefined}
+          color={customPedal.color}
+          glowColor={customPedal.glow_color}
+          isOn={false}
+          onToggle={() => {}}
+        >
+          <div className="text-[8px] text-center text-muted-foreground py-2">
+            Custom Pedal
+          </div>
+        </PedalCase>
+      );
+    }
+
+    return null;
+  };
 
   return (
     <div className="min-h-screen min-h-[100dvh] bg-background flex flex-col overflow-hidden">
@@ -164,6 +321,17 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
               <span className="text-[9px] font-mono text-foreground w-6">{Math.round(params.volume * 100)}%</span>
             </div>
 
+            {/* Reorder toggle */}
+            <button
+              onClick={() => setEditingOrder(!editingOrder)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors touch-manipulation ${
+                editingOrder ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'
+              }`}
+            >
+              <ArrowLeftRight className="w-3.5 h-3.5" />
+              <span className="text-[10px] font-medium hidden sm:inline">Ordem</span>
+            </button>
+
             {/* Presets */}
             <button
               onClick={() => setShowPresets(!showPresets)}
@@ -208,7 +376,6 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
       {showPresets && (
         <div className="bg-card border-b border-border px-3 py-3 flex-shrink-0">
           <div className="max-w-4xl mx-auto space-y-3">
-            {/* Save preset */}
             <div className="flex gap-2">
               <input
                 type="text"
@@ -225,7 +392,6 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
                 <Save className="w-4 h-4" />
               </button>
             </div>
-            {/* Preset list */}
             <div className="flex gap-2 overflow-x-auto pb-1">
               {presets.map(p => (
                 <div key={p.id} className="flex items-center gap-1 shrink-0">
@@ -258,57 +424,19 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
         </div>
       )}
 
+      {/* Editing hint */}
+      {editingOrder && (
+        <div className="mx-3 mt-2 p-2 rounded-lg bg-primary/10 border border-primary/30 text-center flex-shrink-0">
+          <p className="text-[10px] text-primary font-medium">
+            Use as setas ◀ ▶ para reordenar os pedais na cadeia de sinal
+          </p>
+        </div>
+      )}
+
       {/* Pedals Grid */}
       <main className="flex-1 p-3 overflow-y-auto overflow-x-hidden">
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-w-4xl mx-auto">
-          <CompressorPedal
-            isOn={pedalState.compressor} onToggle={() => togglePedal('compressor')}
-            params={params.compressor} onParamChange={(p, v) => updateParam('compressor', p, v)}
-          />
-          <DrivePedal
-            isOn={pedalState.drive} onToggle={() => togglePedal('drive')}
-            params={params.drive} onParamChange={(p, v) => updateParam('drive', p, v)}
-          />
-          <DistortionPedal
-            isOn={pedalState.distortion} onToggle={() => togglePedal('distortion')}
-            params={params.distortion} onParamChange={(p, v) => updateParam('distortion', p, v)}
-          />
-          <ChorusPedal
-            isOn={pedalState.chorus} onToggle={() => togglePedal('chorus')}
-            params={params.chorus} onParamChange={(p, v) => updateParam('chorus', p, v)}
-          />
-          <TremoloPedal
-            isOn={pedalState.tremolo} onToggle={() => togglePedal('tremolo')}
-            params={params.tremolo} onParamChange={(p, v) => updateParam('tremolo', p, v)}
-          />
-          <DelayPedal
-            isOn={pedalState.delay} onToggle={() => togglePedal('delay')}
-            params={params.delay} onParamChange={(p, v) => updateParam('delay', p, v)}
-          />
-          <WahPedal
-            isOn={pedalState.wah} onToggle={() => togglePedal('wah')}
-            params={params.wah} onParamChange={(p, v) => updateParam('wah', p, v)}
-          />
-          <ReverbPedal
-            isOn={pedalState.reverb} onToggle={() => togglePedal('reverb')}
-            params={params.reverb} onParamChange={(p, v) => updateParam('reverb', p, v)}
-          />
-          {/* Custom pedals from DB */}
-          {visibleCustomPedals.map(cp => (
-            <PedalCase
-              key={cp.id}
-              name={cp.name}
-              subtitle={cp.subtitle || undefined}
-              color={cp.color}
-              glowColor={cp.glow_color}
-              isOn={false}
-              onToggle={() => {}}
-            >
-              <div className="text-[8px] text-center text-muted-foreground py-2">
-                Custom Pedal
-              </div>
-            </PedalCase>
-          ))}
+          {pedalOrder.map((pedalId, index) => renderPedal(pedalId, index))}
         </div>
       </main>
     </div>
