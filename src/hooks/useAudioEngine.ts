@@ -91,8 +91,7 @@ function makeDistortionCurve(amount: number): Float32Array<ArrayBuffer> {
   const curve = new Float32Array(buffer);
   const deg = Math.PI / 180;
   
-  // Increased multiplier from 100 to 300 for more aggressive distortion
-  const intensity = amount * 300;
+  const intensity = amount * 500;
   
   for (let i = 0; i < samples; i++) {
     const x = (i * 2) / samples - 1;
@@ -123,10 +122,10 @@ export function useAudioEngine() {
   });
   
   const [params, setParams] = useState<PedalParams>({
-    compressor: { threshold: -20, ratio: 4, attack: 0.003, release: 0.25 },
-    drive: { gain: 0.7, tone: 0.6 }, // Increased default gain
-    distortion: { gain: 0.8, tone: 0.6 },
-    chorus: { rate: 1.5, depth: 0.7, feedback: 0.4 },
+    compressor: { threshold: -15, ratio: 6, attack: 0.001, release: 0.15 },
+    drive: { gain: 0.85, tone: 0.7 },
+    distortion: { gain: 0.9, tone: 0.65 },
+    chorus: { rate: 2, depth: 0.8, feedback: 0.5 },
     tremolo: { rate: 4, depth: 0.5 },
     delay: { time: 0.3, feedback: 0.4, mix: 0.5 },
     wah: { frequency: 0.5, resonance: 10 },
@@ -232,7 +231,7 @@ export function useAudioEngine() {
     
     // ===== STANDARD DISTORTION =====
     distortionPreGainRef.current = ctx.createGain();
-    distortionPreGainRef.current.gain.value = 4; // Pre-amplification for more power
+    distortionPreGainRef.current.gain.value = 6; // Higher pre-amplification
     
     distortionNodeRef.current = ctx.createWaveShaper();
     distortionNodeRef.current.curve = makeDistortionCurve(params.distortion.gain);
@@ -252,12 +251,13 @@ export function useAudioEngine() {
         ratio: params.compressor.ratio,
         attack: params.compressor.attack,
         release: params.compressor.release,
+        makeupGain: 3,
         bypass: !pedalState.compressor,
       }),
       overdrive: new tuna.Overdrive({
-        outputGain: 0.8, // Increased from 0.5
-        drive: params.drive.gain * 1.5 + 0.3, // Increased multiplier
-        curveAmount: params.drive.tone * 1.2, // Increased
+        outputGain: 1.0,
+        drive: params.drive.gain * 2.0 + 0.4,
+        curveAmount: params.drive.tone * 1.5,
         algorithmIndex: 0,
         bypass: !pedalState.drive,
       }),
@@ -265,7 +265,7 @@ export function useAudioEngine() {
         rate: params.chorus.rate,
         feedback: params.chorus.feedback,
         depth: params.chorus.depth,
-        delay: 0.0045,
+        delay: 0.003,
         bypass: !pedalState.chorus,
       }),
       tremolo: new tuna.Tremolo({
@@ -388,8 +388,8 @@ export function useAudioEngine() {
       
       // ULTRA LOW LATENCY CONFIGURATION
       const ctx = new AudioContext({ 
-        sampleRate: 48000,
-        latencyHint: 'playback' // Changed from 'interactive' for even lower latency
+        sampleRate: 44100,
+        latencyHint: 0 // Absolute minimum latency
       });
       
       if (ctx.state === 'suspended') {
@@ -407,8 +407,8 @@ export function useAudioEngine() {
       gainNodeRef.current.gain.value = params.volume;
       
       analyserRef.current = ctx.createAnalyser();
-      analyserRef.current.fftSize = 1024; // Reduced for lower latency
-      analyserRef.current.smoothingTimeConstant = 0.6;
+      analyserRef.current.fftSize = 512; // Minimal for lowest latency
+      analyserRef.current.smoothingTimeConstant = 0.3;
       
       createAndConnectEffects();
       
@@ -554,8 +554,8 @@ export function useAudioEngine() {
     }
     
     if (effects.overdrive) {
-      effects.overdrive.drive = params.drive.gain * 1.5 + 0.3;
-      effects.overdrive.curveAmount = params.drive.tone * 1.2;
+      effects.overdrive.drive = params.drive.gain * 2.0 + 0.4;
+      effects.overdrive.curveAmount = params.drive.tone * 1.5;
     }
     
     // Update distortion
