@@ -12,6 +12,8 @@ import { TremoloPedal } from '@/components/pedals/TremoloPedal';
 import { DelayPedal } from '@/components/pedals/DelayPedal';
 import { WahPedal } from '@/components/pedals/WahPedal';
 import { ReverbPedal } from '@/components/pedals/ReverbPedal';
+import { PedalCase } from '@/components/PedalCase';
+import { ParamSlider } from '@/components/ParamSlider';
 import { VidalLogo } from '@/components/VidalLogo';
 import { supabase } from '@/integrations/supabase/client';
 import {
@@ -106,11 +108,8 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
     setShowPresets(false);
   };
 
-  // Count visible pedals (max 8)
-  const maxStandardPedals = 8;
-  const standardPedalCount = 8; // comp, drive, dist, chorus, trem, delay, wah, reverb
-  const customSlotsAvailable = maxStandardPedals - standardPedalCount;
-  const visibleCustomPedals = customPedals.slice(0, Math.max(0, customSlotsAvailable));
+  // Custom pedals to show after standard ones (up to fill 8 total slots, but allow overflow)
+  const visibleCustomPedals = customPedals;
 
   return (
     <div className="min-h-screen min-h-[100dvh] bg-background flex flex-col overflow-hidden">
@@ -294,6 +293,22 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
             isOn={pedalState.reverb} onToggle={() => togglePedal('reverb')}
             params={params.reverb} onParamChange={(p, v) => updateParam('reverb', p, v)}
           />
+          {/* Custom pedals from DB */}
+          {visibleCustomPedals.map(cp => (
+            <PedalCase
+              key={cp.id}
+              name={cp.name}
+              subtitle={cp.subtitle || undefined}
+              color={cp.color}
+              glowColor={cp.glow_color}
+              isOn={false}
+              onToggle={() => {}}
+            >
+              <div className="text-[8px] text-center text-muted-foreground py-2">
+                Custom Pedal
+              </div>
+            </PedalCase>
+          ))}
         </div>
       </main>
     </div>
