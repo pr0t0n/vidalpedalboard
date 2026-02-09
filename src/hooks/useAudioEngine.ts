@@ -34,7 +34,6 @@ export interface PedalParams {
   distortion: {
     gain: number;
     tone: number;
-    evhMode: boolean;
   };
   chorus: {
     rate: number;
@@ -103,20 +102,6 @@ function makeDistortionCurve(amount: number): Float32Array<ArrayBuffer> {
   return curve;
 }
 
-// EVH Brown Sound distortion curve - Van Halen signature
-function makeEVHDistortionCurve(amount: number = 600): Float32Array<ArrayBuffer> {
-  const n_samples = 44100;
-  const buffer = new ArrayBuffer(n_samples * 4);
-  const curve = new Float32Array(buffer);
-  const deg = Math.PI / 180;
-
-  for (let i = 0; i < n_samples; i++) {
-    const x = (i * 2) / n_samples - 1;
-    curve[i] = ((3 + amount) * x * 20 * deg) / (Math.PI + amount * Math.abs(x));
-  }
-
-  return curve;
-}
 
 export function useAudioEngine() {
   const [isConnected, setIsConnected] = useState(false);
@@ -140,7 +125,7 @@ export function useAudioEngine() {
   const [params, setParams] = useState<PedalParams>({
     compressor: { threshold: -20, ratio: 4, attack: 0.003, release: 0.25 },
     drive: { gain: 0.7, tone: 0.6 }, // Increased default gain
-    distortion: { gain: 0.8, tone: 0.6, evhMode: false }, // Increased default gain + EVH mode
+    distortion: { gain: 0.8, tone: 0.6 },
     chorus: { rate: 1.5, depth: 0.7, feedback: 0.4 },
     tremolo: { rate: 4, depth: 0.5 },
     delay: { time: 0.3, feedback: 0.4, mix: 0.5 },
@@ -254,32 +239,11 @@ export function useAudioEngine() {
     distortionNodeRef.current.oversample = '4x';
     
     distortionGainRef.current = ctx.createGain();
-    distortionGainRef.current.gain.value = pedalState.distortion && !params.distortion.evhMode ? 1 : 0;
+    distortionGainRef.current.gain.value = pedalState.distortion ? 1 : 0;
     
     distortionToneRef.current = ctx.createBiquadFilter();
     distortionToneRef.current.type = 'lowpass';
     distortionToneRef.current.frequency.value = 2000 + params.distortion.tone * 6000;
-    
-    // ===== EVH BROWN SOUND DISTORTION =====
-    evhPreGainRef.current = ctx.createGain();
-    evhPreGainRef.current.gain.value = 25; // High pre-gain
-    
-    evhWaveShaperRef.current = ctx.createWaveShaper();
-    evhWaveShaperRef.current.curve = makeEVHDistortionCurve(600);
-    evhWaveShaperRef.current.oversample = '4x';
-    
-    evhLowCutRef.current = ctx.createBiquadFilter();
-    evhLowCutRef.current.type = 'highpass';
-    evhLowCutRef.current.frequency.value = 120; // Tight sound
-    
-    evhMidBoostRef.current = ctx.createBiquadFilter();
-    evhMidBoostRef.current.type = 'peaking';
-    evhMidBoostRef.current.frequency.value = 800; // Brown Sound mids
-    evhMidBoostRef.current.Q.value = 1;
-    evhMidBoostRef.current.gain.value = 6;
-    
-    evhOutputRef.current = ctx.createGain();
-    evhOutputRef.current.gain.value = pedalState.distortion && params.distortion.evhMode ? 0.7 : 0;
     
     // Create Tuna effects with INCREASED POWER for overdrive
     const effects = {
@@ -354,28 +318,19 @@ export function useAudioEngine() {
     previousNode.connect(effects.overdrive);
     previousNode = effects.overdrive;
     
-    // Distortion (parallel dry/wet mixing with EVH option)
+    // Distortion (parallel dry/wet mixing)
     const distortionDryGain = ctx.createGain();
     distortionDryGain.gain.value = pedalState.distortion ? 0 : 1;
     
-    // Standard distortion path
     previousNode.connect(distortionDryGain);
     previousNode.connect(distortionPreGainRef.current);
     distortionPreGainRef.current.connect(distortionNodeRef.current);
     distortionNodeRef.current.connect(distortionToneRef.current);
     distortionToneRef.current.connect(distortionGainRef.current);
     
-    // EVH distortion path
-    previousNode.connect(evhPreGainRef.current);
-    evhPreGainRef.current.connect(evhWaveShaperRef.current);
-    evhWaveShaperRef.current.connect(evhLowCutRef.current);
-    evhLowCutRef.current.connect(evhMidBoostRef.current);
-    evhMidBoostRef.current.connect(evhOutputRef.current);
-    
     const distortionMixer = ctx.createGain();
     distortionDryGain.connect(distortionMixer);
     distortionGainRef.current.connect(distortionMixer);
-    evhOutputRef.current.connect(distortionMixer);
     previousNode = distortionMixer;
     
     // Continue chain
@@ -401,7 +356,7 @@ export function useAudioEngine() {
     gainNodeRef.current.connect(stereoMergerRef.current, 0, 1);
     stereoMergerRef.current.connect(ctx.destination);
     
-    console.log('Effects chain connected with EVH mode support');
+    console.log('Effects chain connected');
   }, [params, pedalState]);
 
   const connect = useCallback(async () => {
@@ -519,11 +474,6 @@ export function useAudioEngine() {
     distortionGainRef.current = null;
     distortionToneRef.current = null;
     distortionPreGainRef.current = null;
-    evhWaveShaperRef.current = null;
-    evhPreGainRef.current = null;
-    evhLowCutRef.current = null;
-    evhMidBoostRef.current = null;
-    evhOutputRef.current = null;
     audioContextRef.current = null;
     tunaRef.current = null;
     effectsRef.current = {};
@@ -554,22 +504,16 @@ export function useAudioEngine() {
         effectsRef.current[effectName].bypass = !newState[pedal];
       }
       
-      // Handle distortion separately (native Web Audio + EVH)
+      // Handle distortion separately (native Web Audio)
       if (pedal === 'distortion') {
-        const isOn = newState.distortion;
-        const isEvh = params.distortion.evhMode;
-        
         if (distortionGainRef.current) {
-          distortionGainRef.current.gain.value = isOn && !isEvh ? 1 : 0;
-        }
-        if (evhOutputRef.current) {
-          evhOutputRef.current.gain.value = isOn && isEvh ? 0.7 : 0;
+          distortionGainRef.current.gain.value = newState.distortion ? 1 : 0;
         }
       }
       
       return newState;
     });
-  }, [params.distortion.evhMode]);
+  }, []);
 
   const updateParam = useCallback((
     pedal: keyof Omit<PedalParams, 'volume'>,
@@ -598,29 +542,6 @@ export function useAudioEngine() {
     }
   }, []);
 
-  // Toggle EVH mode
-  const toggleEVHMode = useCallback(() => {
-    setParams(prev => {
-      const newEvhMode = !prev.distortion.evhMode;
-      
-      // Update gain nodes
-      if (distortionGainRef.current) {
-        distortionGainRef.current.gain.value = pedalState.distortion && !newEvhMode ? 1 : 0;
-      }
-      if (evhOutputRef.current) {
-        evhOutputRef.current.gain.value = pedalState.distortion && newEvhMode ? 0.7 : 0;
-      }
-      
-      return {
-        ...prev,
-        distortion: {
-          ...prev.distortion,
-          evhMode: newEvhMode,
-        },
-      };
-    });
-  }, [pedalState.distortion]);
-
   // Update effects when params change
   useEffect(() => {
     if (!isConnected) return;
@@ -645,12 +566,8 @@ export function useAudioEngine() {
       distortionToneRef.current.frequency.value = 2000 + params.distortion.tone * 6000;
     }
     
-    // Update EVH/Standard mode switching
     if (distortionGainRef.current) {
-      distortionGainRef.current.gain.value = pedalState.distortion && !params.distortion.evhMode ? 1 : 0;
-    }
-    if (evhOutputRef.current) {
-      evhOutputRef.current.gain.value = pedalState.distortion && params.distortion.evhMode ? 0.7 : 0;
+      distortionGainRef.current.gain.value = pedalState.distortion ? 1 : 0;
     }
     
     if (effects.chorus) {
@@ -701,7 +618,7 @@ export function useAudioEngine() {
     togglePedal,
     updateParam,
     setVolume,
-    toggleEVHMode,
+    
     checkPermission,
   };
 }

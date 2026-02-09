@@ -41,7 +41,7 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
   const {
     isConnected, isLoading, error, inputLevel,
     pedalState, params, connect, disconnect,
-    togglePedal, updateParam, setVolume, toggleEVHMode,
+    togglePedal, updateParam, setVolume,
   } = useAudioEngine();
 
   const { presets, savePreset, activatePreset, deletePreset } = usePresets(user?.id);
@@ -273,7 +273,6 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
           <DistortionPedal
             isOn={pedalState.distortion} onToggle={() => togglePedal('distortion')}
             params={params.distortion} onParamChange={(p, v) => updateParam('distortion', p, v)}
-            onToggleEVH={toggleEVHMode}
           />
           <ChorusPedal
             isOn={pedalState.chorus} onToggle={() => togglePedal('chorus')}

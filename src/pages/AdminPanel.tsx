@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Plus, Trash2, Users, Shield } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Users, Shield, Key } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { VidalLogo } from '@/components/VidalLogo';
 
@@ -12,12 +12,17 @@ interface UserItem {
 
 export default function AdminPanel() {
   const [users, setUsers] = useState<UserItem[]>([]);
-  const [newEmail, setNewEmail] = useState('');
+  const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newName, setNewName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  // Password change
+  const [changePasswordUserId, setChangePasswordUserId] = useState<string | null>(null);
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [passwordMsg, setPasswordMsg] = useState('');
 
   const fetchUsers = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -49,12 +54,14 @@ export default function AdminPanel() {
     setSuccess('');
     setIsCreating(true);
 
+    const email = `${newUsername}@vidalpedalboard.com`;
+
     const res = await supabase.functions.invoke('manage-users', {
       body: {
         action: 'create-user',
-        email: newEmail,
+        email,
         password: newPassword,
-        display_name: newName,
+        display_name: newName || newUsername,
       },
     });
 
@@ -62,7 +69,7 @@ export default function AdminPanel() {
       setError(res.data?.error || res.error?.message || 'Erro ao criar usuário');
     } else {
       setSuccess('Usuário criado com sucesso!');
-      setNewEmail('');
+      setNewUsername('');
       setNewPassword('');
       setNewName('');
       fetchUsers();
@@ -79,6 +86,29 @@ export default function AdminPanel() {
 
     if (!res.error && !res.data?.error) {
       fetchUsers();
+    }
+  };
+
+  const handleChangePassword = async (userId: string) => {
+    if (!newUserPassword || newUserPassword.length < 6) {
+      setPasswordMsg('Senha deve ter pelo menos 6 caracteres');
+      return;
+    }
+    setPasswordMsg('');
+
+    const res = await supabase.functions.invoke('manage-users', {
+      body: { action: 'change-password', user_id: userId, new_password: newUserPassword },
+    });
+
+    if (res.error || res.data?.error) {
+      setPasswordMsg(res.data?.error || 'Erro ao alterar senha');
+    } else {
+      setPasswordMsg('Senha alterada com sucesso!');
+      setNewUserPassword('');
+      setTimeout(() => {
+        setChangePasswordUserId(null);
+        setPasswordMsg('');
+      }, 1500);
     }
   };
 
@@ -110,16 +140,15 @@ export default function AdminPanel() {
               type="text"
               value={newName}
               onChange={e => setNewName(e.target.value)}
-              required
-              placeholder="Nome"
+              placeholder="Nome de exibição"
               className="w-full px-3 py-2.5 rounded-lg bg-muted border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
             />
             <input
-              type="email"
-              value={newEmail}
-              onChange={e => setNewEmail(e.target.value)}
+              type="text"
+              value={newUsername}
+              onChange={e => setNewUsername(e.target.value)}
               required
-              placeholder="Email"
+              placeholder="Usuário (login)"
               className="w-full px-3 py-2.5 rounded-lg bg-muted border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
             />
             <input
@@ -150,18 +179,48 @@ export default function AdminPanel() {
           </h2>
           <div className="space-y-2">
             {users.map(u => (
-              <div key={u.user_id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                <div>
-                  <p className="text-sm font-medium">{u.display_name}</p>
-                  <p className="text-[10px] font-mono text-muted-foreground uppercase">{u.role}</p>
+              <div key={u.user_id} className="bg-muted/50 rounded-lg">
+                <div className="flex items-center justify-between p-3">
+                  <div>
+                    <p className="text-sm font-medium">{u.display_name}</p>
+                    <p className="text-[10px] font-mono text-muted-foreground uppercase">{u.role}</p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setChangePasswordUserId(changePasswordUserId === u.user_id ? null : u.user_id)}
+                      className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                      title="Alterar senha"
+                    >
+                      <Key className="w-4 h-4" />
+                    </button>
+                    {u.role !== 'admin' && (
+                      <button
+                        onClick={() => handleDeleteUser(u.user_id)}
+                        className="p-2 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-                {u.role !== 'admin' && (
-                  <button
-                    onClick={() => handleDeleteUser(u.user_id)}
-                    className="p-2 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                {changePasswordUserId === u.user_id && (
+                  <div className="px-3 pb-3 flex gap-2">
+                    <input
+                      type="password"
+                      value={newUserPassword}
+                      onChange={e => setNewUserPassword(e.target.value)}
+                      placeholder="Nova senha"
+                      minLength={6}
+                      className="flex-1 px-3 py-2 rounded-lg bg-muted border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    />
+                    <button
+                      onClick={() => handleChangePassword(u.user_id)}
+                      className="px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-semibold active:scale-95"
+                    >
+                      Salvar
+                    </button>
+                    {passwordMsg && <span className="text-xs self-center text-muted-foreground">{passwordMsg}</span>}
+                  </div>
                 )}
               </div>
             ))}

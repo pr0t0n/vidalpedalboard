@@ -6,7 +6,7 @@ interface LoginProps {
 }
 
 export default function Login({ onLogin }: LoginProps) {
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -16,9 +16,11 @@ export default function Login({ onLogin }: LoginProps) {
     setError('');
     setIsLoading(true);
 
+    // Convert username to email format for Supabase auth
+    const email = username.includes('@') ? username : `${username}@vidalpedalboard.com`;
     const { error: loginError } = await onLogin(email, password);
     if (loginError) {
-      setError('Email ou senha incorretos.');
+      setError('Usuário ou senha incorretos.');
     }
     setIsLoading(false);
   };
@@ -33,15 +35,15 @@ export default function Login({ onLogin }: LoginProps) {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-mono text-muted-foreground mb-1.5 uppercase tracking-wider">
-              Email
+              Usuário
             </label>
             <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
               required
               className="w-full px-4 py-3 rounded-xl bg-card border border-border text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-              placeholder="seu@email.com"
+              placeholder="seu usuário"
             />
           </div>
 

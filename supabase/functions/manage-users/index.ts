@@ -92,6 +92,25 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "change-password") {
+      const { user_id, new_password } = body;
+      if (!user_id || !new_password || new_password.length < 6) {
+        return new Response(JSON.stringify({ error: "Invalid password (min 6 chars)" }), { status: 400, headers: corsHeaders });
+      }
+
+      const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(user_id, {
+        password: new_password,
+      });
+
+      if (updateError) {
+        return new Response(JSON.stringify({ error: updateError.message }), { status: 400, headers: corsHeaders });
+      }
+
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     return new Response(JSON.stringify({ error: "Unknown action" }), { status: 400, headers: corsHeaders });
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
