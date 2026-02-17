@@ -73,34 +73,32 @@ function frequencyToNote(frequency: number, clarity: number): TunerData {
   if (frequency < 20 || frequency > 5000 || !isFinite(frequency)) {
     return { frequency: 0, note: '-', cents: 0, octave: 0, clarity: 0 };
   }
-  
   const semitonesFromA4 = 12 * Math.log2(frequency / A4_FREQUENCY);
   const roundedSemitones = Math.round(semitonesFromA4);
   const cents = Math.round((semitonesFromA4 - roundedSemitones) * 100);
   const midiNote = 69 + roundedSemitones;
   const note = NOTE_NAMES[((midiNote % 12) + 12) % 12];
   const octave = Math.floor(midiNote / 12) - 1;
-  
   return { frequency, note, cents, octave, clarity };
 }
 
-// Create distortion curve for waveshaper - INCREASED POWER
+// Pre-computed distortion curve cached by amount
+const curveCache = new Map<number, Float32Array<ArrayBuffer>>();
 function makeDistortionCurve(amount: number): Float32Array<ArrayBuffer> {
-  const samples = 44100;
+  const key = Math.round(amount * 100);
+  if (curveCache.has(key)) return curveCache.get(key)!;
+  const samples = 8192;
   const buffer = new ArrayBuffer(samples * 4);
   const curve = new Float32Array(buffer);
   const deg = Math.PI / 180;
-  
   const intensity = amount * 300;
-  
   for (let i = 0; i < samples; i++) {
     const x = (i * 2) / samples - 1;
     curve[i] = ((3 + intensity) * x * 20 * deg) / (Math.PI + intensity * Math.abs(x));
   }
-  
+  curveCache.set(key, curve);
   return curve;
 }
-
 
 export function useAudioEngine() {
   const [isConnected, setIsConnected] = useState(false);
@@ -111,14 +109,8 @@ export function useAudioEngine() {
   const [tunerData, setTunerData] = useState<TunerData>({ frequency: 0, note: '-', cents: 0, octave: 0, clarity: 0 });
   
   const [pedalState, setPedalState] = useState<PedalState>({
-    compressor: false,
-    drive: false,
-    distortion: false,
-    chorus: false,
-    tremolo: false,
-    delay: false,
-    wah: false,
-    reverb: false,
+    compressor: false, drive: false, distortion: false, chorus: false,
+    tremolo: false, delay: false, wah: false, reverb: false,
   });
   
   const [params, setParams] = useState<PedalParams>({
@@ -138,87 +130,65 @@ export function useAudioEngine() {
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
+  // Analyser is OFF the main signal path — connected in parallel
   const analyserRef = useRef<AnalyserNode | null>(null);
   const stereoMergerRef = useRef<ChannelMergerNode | null>(null);
   
-  // Standard distortion nodes
+  // Distortion nodes
   const distortionNodeRef = useRef<WaveShaperNode | null>(null);
   const distortionGainRef = useRef<GainNode | null>(null);
   const distortionToneRef = useRef<BiquadFilterNode | null>(null);
   const distortionPreGainRef = useRef<GainNode | null>(null);
-  
-  // EVH distortion nodes
-  const evhWaveShaperRef = useRef<WaveShaperNode | null>(null);
-  const evhPreGainRef = useRef<GainNode | null>(null);
-  const evhLowCutRef = useRef<BiquadFilterNode | null>(null);
-  const evhMidBoostRef = useRef<BiquadFilterNode | null>(null);
-  const evhOutputRef = useRef<GainNode | null>(null);
+  const distortionDryGainRef = useRef<GainNode | null>(null);
   
   const effectsRef = useRef<Record<string, any>>({});
-  const animationFrameRef = useRef<number | null>(null);
+  const meterIntervalRef = useRef<number | null>(null);
   const performanceIntervalRef = useRef<number | null>(null);
 
   const checkPermission = useCallback(async (): Promise<PermissionState | 'unknown'> => {
     try {
-      if (navigator.permissions && navigator.permissions.query) {
+      if (navigator.permissions?.query) {
         const result = await navigator.permissions.query({ name: 'microphone' as PermissionName });
         return result.state;
       }
-    } catch {
-      // Permissions API not supported
-    }
+    } catch { /* unsupported */ }
     return 'unknown';
+  }, []);
+
+  // Lightweight meter — runs at 15fps via setInterval instead of rAF to reduce GC/scheduling overhead
+  const startMeter = useCallback(() => {
+    if (meterIntervalRef.current) return;
+    const buffer = new Float32Array(256); // small reusable buffer
+    meterIntervalRef.current = window.setInterval(() => {
+      if (!analyserRef.current) return;
+      analyserRef.current.getFloatTimeDomainData(buffer);
+      let sum = 0;
+      for (let i = 0; i < 256; i++) sum += buffer[i] * buffer[i];
+      setInputLevel(Math.min(1, Math.sqrt(sum / 256) * 5));
+    }, 66); // ~15fps
+  }, []);
+
+  const stopMeter = useCallback(() => {
+    if (meterIntervalRef.current) {
+      clearInterval(meterIntervalRef.current);
+      meterIntervalRef.current = null;
+    }
   }, []);
 
   const updatePerformanceStats = useCallback(() => {
     const stats: PerformanceStats = { cpu: 0, memory: 0, latency: 0 };
-    
     if ((performance as any).memory) {
-      const memInfo = (performance as any).memory;
-      stats.memory = Math.round((memInfo.usedJSHeapSize / memInfo.jsHeapSizeLimit) * 100);
+      const m = (performance as any).memory;
+      stats.memory = Math.round((m.usedJSHeapSize / m.jsHeapSizeLimit) * 100);
     }
-    
     if (audioContextRef.current) {
       stats.latency = Math.round((audioContextRef.current.baseLatency || 0) * 1000);
     }
-    
-    if (audioContextRef.current && audioContextRef.current.state === 'running') {
-      const now = performance.now();
-      const start = now;
-      requestAnimationFrame(() => {
-        const frameTime = performance.now() - start;
-        stats.cpu = Math.min(100, Math.round(frameTime / 16.67 * 100));
-        setPerformanceStats(prev => ({ ...prev, ...stats }));
-      });
-    } else {
-      setPerformanceStats(stats);
-    }
+    setPerformanceStats(stats);
   }, []);
 
-  const updateInputLevel = useCallback(() => {
-    if (!analyserRef.current || !isConnected) {
-      animationFrameRef.current = requestAnimationFrame(updateInputLevel);
-      return;
-    }
-    
-    const analyser = analyserRef.current;
-    const bufferLength = analyser.fftSize;
-    const buffer = new Float32Array(bufferLength);
-    analyser.getFloatTimeDomainData(buffer);
-    
-    // Calculate RMS for level meter
-    let rms = 0;
-    for (let i = 0; i < bufferLength; i++) {
-      rms += buffer[i] * buffer[i];
-    }
-    rms = Math.sqrt(rms / bufferLength);
-    setInputLevel(Math.min(1, rms * 5));
-    
-    animationFrameRef.current = requestAnimationFrame(updateInputLevel);
-  }, [isConnected]);
-
   const createAndConnectEffects = useCallback(() => {
-    if (!tunaRef.current || !audioContextRef.current || !sourceRef.current || !gainNodeRef.current || !analyserRef.current) {
+    if (!tunaRef.current || !audioContextRef.current || !sourceRef.current || !gainNodeRef.current) {
       console.error('Audio context not ready');
       return;
     }
@@ -226,16 +196,23 @@ export function useAudioEngine() {
     const tuna = tunaRef.current;
     const ctx = audioContextRef.current;
     
-    // Create stereo merger for mono-to-stereo conversion
+    // Stereo merger for mono→stereo
     stereoMergerRef.current = ctx.createChannelMerger(2);
     
-    // ===== STANDARD DISTORTION =====
+    // ===== ANALYSER OFF SIGNAL PATH =====
+    // Key optimization: analyser taps the source in parallel, not in series
+    analyserRef.current = ctx.createAnalyser();
+    analyserRef.current.fftSize = 256; // absolute minimum for metering
+    analyserRef.current.smoothingTimeConstant = 0.1;
+    sourceRef.current.connect(analyserRef.current); // parallel tap — no latency added
+    
+    // ===== DISTORTION (native Web Audio) =====
     distortionPreGainRef.current = ctx.createGain();
     distortionPreGainRef.current.gain.value = 4;
     
     distortionNodeRef.current = ctx.createWaveShaper();
     distortionNodeRef.current.curve = makeDistortionCurve(params.distortion.gain);
-    distortionNodeRef.current.oversample = '4x';
+    distortionNodeRef.current.oversample = '2x'; // reduced from 4x — huge latency save
     
     distortionGainRef.current = ctx.createGain();
     distortionGainRef.current.gain.value = pedalState.distortion ? 1 : 0;
@@ -244,7 +221,10 @@ export function useAudioEngine() {
     distortionToneRef.current.type = 'lowpass';
     distortionToneRef.current.frequency.value = 2000 + params.distortion.tone * 6000;
     
-    // Create Tuna effects with INCREASED POWER for overdrive
+    distortionDryGainRef.current = ctx.createGain();
+    distortionDryGainRef.current.gain.value = pedalState.distortion ? 0 : 1;
+    
+    // ===== TUNA EFFECTS =====
     const effects = {
       compressor: new tuna.Compressor({
         threshold: params.compressor.threshold,
@@ -291,8 +271,7 @@ export function useAudioEngine() {
         bypass: !pedalState.wah,
       }),
       convolver: new tuna.Convolver({
-        highCut: 22050,
-        lowCut: 20,
+        highCut: 22050, lowCut: 20,
         dryLevel: 1 - params.reverb.mix * 0.5,
         wetLevel: params.reverb.mix,
         level: 1,
@@ -302,60 +281,52 @@ export function useAudioEngine() {
     
     effectsRef.current = effects;
     
-    // Connect audio chain:
-    // Source -> Analyser -> Compressor -> Drive -> Distortion/EVH -> Chorus -> Tremolo -> Delay -> Wah -> Reverb -> Gain -> Destination
+    // ===== SIGNAL CHAIN (analyser is NOT in this path) =====
+    // Source -> Compressor -> Drive -> Distortion -> Chorus -> Tremolo -> Delay -> Wah -> Reverb -> Gain -> Stereo -> Out
     
-    sourceRef.current.connect(analyserRef.current);
+    let prev: AudioNode = sourceRef.current;
     
-    let previousNode: AudioNode = analyserRef.current;
+    prev.connect(effects.compressor);
+    prev = effects.compressor;
     
-    // Compressor
-    previousNode.connect(effects.compressor);
-    previousNode = effects.compressor;
+    prev.connect(effects.overdrive);
+    prev = effects.overdrive;
     
-    // Overdrive
-    previousNode.connect(effects.overdrive);
-    previousNode = effects.overdrive;
-    
-    // Distortion (parallel dry/wet mixing)
-    const distortionDryGain = ctx.createGain();
-    distortionDryGain.gain.value = pedalState.distortion ? 0 : 1;
-    
-    previousNode.connect(distortionDryGain);
-    previousNode.connect(distortionPreGainRef.current);
+    // Distortion wet/dry
+    prev.connect(distortionDryGainRef.current);
+    prev.connect(distortionPreGainRef.current);
     distortionPreGainRef.current.connect(distortionNodeRef.current);
     distortionNodeRef.current.connect(distortionToneRef.current);
     distortionToneRef.current.connect(distortionGainRef.current);
     
-    const distortionMixer = ctx.createGain();
-    distortionDryGain.connect(distortionMixer);
-    distortionGainRef.current.connect(distortionMixer);
-    previousNode = distortionMixer;
+    const distMixer = ctx.createGain();
+    distortionDryGainRef.current.connect(distMixer);
+    distortionGainRef.current.connect(distMixer);
+    prev = distMixer;
     
-    // Continue chain
-    previousNode.connect(effects.chorus);
-    previousNode = effects.chorus;
+    prev.connect(effects.chorus);
+    prev = effects.chorus;
     
-    previousNode.connect(effects.tremolo);
-    previousNode = effects.tremolo;
+    prev.connect(effects.tremolo);
+    prev = effects.tremolo;
     
-    previousNode.connect(effects.delay);
-    previousNode = effects.delay;
+    prev.connect(effects.delay);
+    prev = effects.delay;
     
-    previousNode.connect(effects.wahwah);
-    previousNode = effects.wahwah;
+    prev.connect(effects.wahwah);
+    prev = effects.wahwah;
     
-    previousNode.connect(effects.convolver);
-    previousNode = effects.convolver;
+    prev.connect(effects.convolver);
+    prev = effects.convolver;
     
-    previousNode.connect(gainNodeRef.current);
+    prev.connect(gainNodeRef.current);
     
-    // Connect to stereo output
-    gainNodeRef.current.connect(stereoMergerRef.current, 0, 0);
-    gainNodeRef.current.connect(stereoMergerRef.current, 0, 1);
-    stereoMergerRef.current.connect(ctx.destination);
+    // Stereo output
+    gainNodeRef.current.connect(stereoMergerRef.current!, 0, 0);
+    gainNodeRef.current.connect(stereoMergerRef.current!, 0, 1);
+    stereoMergerRef.current!.connect(ctx.destination);
     
-    console.log('Effects chain connected');
+    console.log('Effects chain connected (analyser off signal path)');
   }, [params, pedalState]);
 
   const connect = useCallback(async () => {
@@ -364,13 +335,9 @@ export function useAudioEngine() {
     
     try {
       const permission = await checkPermission();
-      console.log('Microphone permission status:', permission);
-      
       if (permission === 'denied') {
         throw new Error('Acesso ao microfone negado. Habilite nas configurações do navegador.');
       }
-      
-      console.log('Requesting microphone access...');
       
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -378,24 +345,21 @@ export function useAudioEngine() {
           noiseSuppression: false,
           autoGainControl: false,
           channelCount: 1,
-          sampleRate: 48000, // Higher sample rate for better quality
+          sampleRate: 48000,
         },
       });
       
-      console.log('Microphone stream obtained:', stream.getAudioTracks());
       streamRef.current = stream;
       
-      // ULTRA LOW LATENCY CONFIGURATION
+      // ULTRA LOW LATENCY: interactive hint + smallest buffer
       const ctx = new AudioContext({ 
         sampleRate: 44100,
-        latencyHint: 0 // Absolute minimum latency
+        latencyHint: 'interactive', // browser picks smallest safe buffer
       });
       
-      if (ctx.state === 'suspended') {
-        await ctx.resume();
-      }
+      if (ctx.state === 'suspended') await ctx.resume();
       
-      console.log('AudioContext state:', ctx.state, 'Sample rate:', ctx.sampleRate, 'Base latency:', ctx.baseLatency);
+      console.log(`AudioContext: sr=${ctx.sampleRate} baseLatency=${ctx.baseLatency}ms outputLatency=${(ctx as any).outputLatency || 'N/A'}ms`);
       
       audioContextRef.current = ctx;
       tunaRef.current = new Tuna(ctx);
@@ -405,24 +369,18 @@ export function useAudioEngine() {
       gainNodeRef.current = ctx.createGain();
       gainNodeRef.current.gain.value = params.volume;
       
-      analyserRef.current = ctx.createAnalyser();
-      analyserRef.current.fftSize = 512; // Minimal for lowest latency
-      analyserRef.current.smoothingTimeConstant = 0.3;
-      
       createAndConnectEffects();
       
       setIsConnected(true);
       
-      animationFrameRef.current = requestAnimationFrame(updateInputLevel);
-      performanceIntervalRef.current = window.setInterval(updatePerformanceStats, 1000);
+      startMeter();
+      performanceIntervalRef.current = window.setInterval(updatePerformanceStats, 2000); // reduced frequency
       
-      console.log('Audio engine connected successfully with low latency');
+      console.log('Audio engine connected — low latency mode');
       
     } catch (err: any) {
       console.error('Audio connection error:', err);
-      
       let errorMessage = 'Erro ao conectar áudio.';
-      
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         errorMessage = 'Permissão de microfone negada. Clique no ícone de cadeado na barra de endereços e permita o acesso.';
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
@@ -432,38 +390,24 @@ export function useAudioEngine() {
       } else if (err.message) {
         errorMessage = err.message;
       }
-      
       setError(errorMessage);
       disconnect();
     } finally {
       setIsLoading(false);
     }
-  }, [params.volume, checkPermission, createAndConnectEffects, updateInputLevel, updatePerformanceStats]);
+  }, [params.volume, checkPermission, createAndConnectEffects, startMeter, updatePerformanceStats]);
 
   const disconnect = useCallback(() => {
-    console.log('Disconnecting audio engine...');
-    
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
-    
+    stopMeter();
     if (performanceIntervalRef.current) {
       clearInterval(performanceIntervalRef.current);
       performanceIntervalRef.current = null;
     }
-    
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => {
-        track.stop();
-        console.log('Stopped track:', track.label);
-      });
+      streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     }
-    
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-    }
+    if (audioContextRef.current) audioContextRef.current.close();
     
     sourceRef.current = null;
     gainNodeRef.current = null;
@@ -473,6 +417,7 @@ export function useAudioEngine() {
     distortionGainRef.current = null;
     distortionToneRef.current = null;
     distortionPreGainRef.current = null;
+    distortionDryGainRef.current = null;
     audioContextRef.current = null;
     tunaRef.current = null;
     effectsRef.current = {};
@@ -481,21 +426,15 @@ export function useAudioEngine() {
     setInputLevel(0);
     setTunerData({ frequency: 0, note: '-', cents: 0, octave: 0, clarity: 0 });
     setPerformanceStats({ cpu: 0, memory: 0, latency: 0 });
-  }, []);
+  }, [stopMeter]);
 
   const togglePedal = useCallback((pedal: keyof PedalState) => {
     setPedalState(prev => {
       const newState = { ...prev, [pedal]: !prev[pedal] };
       
-      // Handle effect bypass
       const effectMap: Record<string, string> = {
-        compressor: 'compressor',
-        drive: 'overdrive',
-        chorus: 'chorus',
-        tremolo: 'tremolo',
-        delay: 'delay',
-        wah: 'wahwah',
-        reverb: 'convolver',
+        compressor: 'compressor', drive: 'overdrive', chorus: 'chorus',
+        tremolo: 'tremolo', delay: 'delay', wah: 'wahwah', reverb: 'convolver',
       };
       
       const effectName = effectMap[pedal];
@@ -503,11 +442,9 @@ export function useAudioEngine() {
         effectsRef.current[effectName].bypass = !newState[pedal];
       }
       
-      // Handle distortion separately (native Web Audio)
       if (pedal === 'distortion') {
-        if (distortionGainRef.current) {
-          distortionGainRef.current.gain.value = newState.distortion ? 1 : 0;
-        }
+        if (distortionGainRef.current) distortionGainRef.current.gain.value = newState.distortion ? 1 : 0;
+        if (distortionDryGainRef.current) distortionDryGainRef.current.gain.value = newState.distortion ? 0 : 1;
       }
       
       return newState;
@@ -522,13 +459,7 @@ export function useAudioEngine() {
     setParams(prev => {
       const pedalParams = prev[pedal];
       if (typeof pedalParams === 'object' && pedalParams !== null) {
-        return {
-          ...prev,
-          [pedal]: {
-            ...pedalParams,
-            [param]: value,
-          },
-        };
+        return { ...prev, [pedal]: { ...pedalParams, [param]: value } };
       }
       return prev;
     });
@@ -536,88 +467,65 @@ export function useAudioEngine() {
 
   const setVolume = useCallback((value: number) => {
     setParams(prev => ({ ...prev, volume: value }));
-    if (gainNodeRef.current) {
-      gainNodeRef.current.gain.value = value;
-    }
+    if (gainNodeRef.current) gainNodeRef.current.gain.value = value;
   }, []);
 
-  // Update effects when params change
+  // Update live effect params
   useEffect(() => {
     if (!isConnected) return;
-    
     const effects = effectsRef.current;
     
     if (effects.compressor) {
       effects.compressor.threshold = params.compressor.threshold;
       effects.compressor.ratio = params.compressor.ratio;
     }
-    
     if (effects.overdrive) {
       effects.overdrive.drive = params.drive.gain * 1.5 + 0.3;
       effects.overdrive.curveAmount = params.drive.tone * 1.2;
     }
-    
-    // Update distortion
     if (distortionNodeRef.current) {
       distortionNodeRef.current.curve = makeDistortionCurve(params.distortion.gain);
     }
     if (distortionToneRef.current) {
       distortionToneRef.current.frequency.value = 2000 + params.distortion.tone * 6000;
     }
-    
     if (distortionGainRef.current) {
       distortionGainRef.current.gain.value = pedalState.distortion ? 1 : 0;
     }
-    
+    if (distortionDryGainRef.current) {
+      distortionDryGainRef.current.gain.value = pedalState.distortion ? 0 : 1;
+    }
     if (effects.chorus) {
       effects.chorus.rate = params.chorus.rate;
       effects.chorus.feedback = params.chorus.feedback;
       effects.chorus.depth = params.chorus.depth;
     }
-    
     if (effects.tremolo) {
       effects.tremolo.intensity = params.tremolo.depth;
       effects.tremolo.rate = params.tremolo.rate;
     }
-    
     if (effects.delay) {
       effects.delay.delayTime = params.delay.time * 1000;
       effects.delay.feedback = params.delay.feedback;
       effects.delay.wetLevel = params.delay.mix;
     }
-    
     if (effects.wahwah) {
       effects.wahwah.baseFrequency = params.wah.frequency;
       effects.wahwah.resonance = params.wah.resonance;
     }
-    
     if (effects.convolver) {
       effects.convolver.wetLevel = params.reverb.mix;
     }
   }, [params, isConnected, pedalState.distortion]);
 
-  // Cleanup on unmount
   useEffect(() => {
-    return () => {
-      disconnect();
-    };
+    return () => { disconnect(); };
   }, [disconnect]);
 
   return {
-    isConnected,
-    isLoading,
-    error,
-    inputLevel,
-    tunerData,
-    pedalState,
-    params,
-    performanceStats,
-    connect,
-    disconnect,
-    togglePedal,
-    updateParam,
-    setVolume,
-    
+    isConnected, isLoading, error, inputLevel, tunerData,
+    pedalState, params, performanceStats,
+    connect, disconnect, togglePedal, updateParam, setVolume,
     checkPermission,
   };
 }
