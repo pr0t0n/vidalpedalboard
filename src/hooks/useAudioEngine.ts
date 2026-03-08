@@ -153,7 +153,6 @@ export function useAudioEngine() {
   const streamRef = useRef<MediaStream | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const mergerRef = useRef<ChannelMergerNode | null>(null);
 
   // Native effect node refs for live param updates
   const compressorNodeRef = useRef<DynamicsCompressorNode | null>(null);
