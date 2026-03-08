@@ -71,28 +71,40 @@ function createBypassable(ctx: AudioContext, buildWetChain: (input: GainNode, ou
   const output = ctx.createGain();
   const dryGain = ctx.createGain();
   const wetGain = ctx.createGain();
-
-  // Dry path
-  input.connect(dryGain).connect(output);
-
-  // Wet path — caller connects nodes between wetInput and wetOutput
   const wetInput = ctx.createGain();
   const wetOutput = ctx.createGain();
-  input.connect(wetInput);
+
+  // Dry path is always connected
+  input.connect(dryGain).connect(output);
   wetOutput.connect(wetGain).connect(output);
 
+  // Build wet chain, but only connect input->wet when effect is ON
   buildWetChain(wetInput, wetOutput);
 
-  // Start bypassed
+  let wetConnected = false;
+
+  // Start bypassed (hard bypass: wet path physically disconnected)
   dryGain.gain.value = 1;
   wetGain.gain.value = 0;
 
   return {
-    input, output, wetGain, dryGain,
+    input,
+    output,
+    wetGain,
+    dryGain,
     setBypass(bypassed: boolean) {
       const t = ctx.currentTime;
-      dryGain.gain.setTargetAtTime(bypassed ? 1 : 0, t, 0.005);
-      wetGain.gain.setTargetAtTime(bypassed ? 0 : 1, t, 0.005);
+
+      if (bypassed && wetConnected) {
+        input.disconnect(wetInput);
+        wetConnected = false;
+      } else if (!bypassed && !wetConnected) {
+        input.connect(wetInput);
+        wetConnected = true;
+      }
+
+      dryGain.gain.setTargetAtTime(bypassed ? 1 : 0, t, 0.003);
+      wetGain.gain.setTargetAtTime(bypassed ? 0 : 1, t, 0.003);
     },
   };
 }
@@ -367,15 +379,33 @@ export function useAudioEngine() {
       const perm = await checkPermission();
       if (perm === 'denied') throw new Error('Acesso ao microfone negado. Habilite nas configurações do navegador.');
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
-      });
+      const audioConstraints: MediaTrackConstraints & Record<string, unknown> = {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        channelCount: 1,
+        latency: 0,
+        sampleRate: 48000,
+        sampleSize: 16,
+        // Chromium-specific flags to force raw/low-latency capture when available
+        googEchoCancellation: false,
+        googAutoGainControl: false,
+        googNoiseSuppression: false,
+        googHighpassFilter: false,
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
       streamRef.current = stream;
 
-      const ctx = new AudioContext({ sampleRate: 44100, latencyHint: 'interactive' });
+      const trackSettings = stream.getAudioTracks()[0]?.getSettings();
+      const targetSampleRate = typeof trackSettings?.sampleRate === 'number' && trackSettings.sampleRate > 0
+        ? trackSettings.sampleRate
+        : 48000;
+
+      const ctx = new AudioContext({ sampleRate: targetSampleRate, latencyHint: 'interactive' });
       if (ctx.state === 'suspended') await ctx.resume();
 
-      console.log(`AudioContext: sr=${ctx.sampleRate} baseLatency=${ctx.baseLatency}s outputLatency=${(ctx as any).outputLatency || 'N/A'}s bufferSize=${128}`);
+      console.log(`AudioContext: sr=${ctx.sampleRate} baseLatency=${ctx.baseLatency}s outputLatency=${(ctx as any).outputLatency || 'N/A'}s`);
 
       ctxRef.current = ctx;
       sourceRef.current = ctx.createMediaStreamSource(stream);
