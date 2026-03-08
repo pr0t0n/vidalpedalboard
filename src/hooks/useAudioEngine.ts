@@ -38,8 +38,8 @@ export interface PerformanceStats {
 }
 
 // ===== DISTORTION CURVE (cached) =====
-const curveCache = new Map<number, Float32Array<ArrayBuffer>>();
-function makeDistortionCurve(amount: number): Float32Array<ArrayBuffer> {
+const curveCache = new Map<number, Float32Array>();
+function makeDistortionCurve(amount: number): Float32Array {
   const key = Math.round(amount * 100);
   if (curveCache.has(key)) return curveCache.get(key)!;
   const samples = 2048;
@@ -249,7 +249,7 @@ export function useAudioEngine() {
     // ===== 2. DRIVE (WaveShaper + tone filter) =====
     const drive = createBypassable(ctx, (inp, out) => {
       const ws = ctx.createWaveShaper();
-      ws.curve = makeDistortionCurve(params.drive.gain * 0.5);
+      ws.curve = makeDistortionCurve(params.drive.gain * 0.5) as any;
       ws.oversample = 'none';
       driveWaveShaperRef.current = ws;
       const tone = ctx.createBiquadFilter();
@@ -265,7 +265,7 @@ export function useAudioEngine() {
       const preGain = ctx.createGain();
       preGain.gain.value = 4;
       const ws = ctx.createWaveShaper();
-      ws.curve = makeDistortionCurve(params.distortion.gain);
+      ws.curve = makeDistortionCurve(params.distortion.gain) as any;
       ws.oversample = 'none'; // zero additional latency
       distWaveShaperRef.current = ws;
       const tone = ctx.createBiquadFilter();
@@ -505,11 +505,11 @@ export function useAudioEngine() {
     }
 
     // Drive
-    if (driveWaveShaperRef.current) driveWaveShaperRef.current.curve = makeDistortionCurve(params.drive.gain * 0.5);
+    if (driveWaveShaperRef.current) driveWaveShaperRef.current.curve = makeDistortionCurve(params.drive.gain * 0.5) as any;
     if (driveToneRef.current) driveToneRef.current.frequency.value = 3000 + params.drive.tone * 5000;
 
     // Distortion
-    if (distWaveShaperRef.current) distWaveShaperRef.current.curve = makeDistortionCurve(params.distortion.gain);
+    if (distWaveShaperRef.current) distWaveShaperRef.current.curve = makeDistortionCurve(params.distortion.gain) as any;
     if (distToneRef.current) distToneRef.current.frequency.value = 2000 + params.distortion.tone * 6000;
 
     // Chorus
