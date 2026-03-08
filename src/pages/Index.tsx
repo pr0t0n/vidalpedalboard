@@ -275,15 +275,7 @@ const Index = () => {
               <span className="text-[10px] font-medium hidden sm:inline">Pedais</span>
             </Link>
 
-            {/* Admin */}
-            {isAdmin && (
-              <Link to="/admin" className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors">
-                <Shield className="w-3.5 h-3.5" />
-                <span className="text-[10px] font-medium hidden sm:inline">Admin</span>
-              </Link>
-            )}
-
-            {/* Status & Logout */}
+            {/* Status */}
             <div className="flex items-center gap-2">
               <div
                 className="w-2 h-2 rounded-full"
@@ -292,9 +284,6 @@ const Index = () => {
                   boxShadow: isConnected ? '0 0 6px hsl(142, 70%, 45%)' : 'none',
                 }}
               />
-              <button onClick={onSignOut} className="p-2 rounded-lg hover:bg-muted/80 transition-colors touch-manipulation">
-                <LogOut className="w-3.5 h-3.5 text-muted-foreground" />
-              </button>
             </div>
           </div>
         </div>
