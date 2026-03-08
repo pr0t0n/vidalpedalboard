@@ -505,7 +505,7 @@ export function useAudioEngine() {
     }
 
     // Drive
-    if (driveWaveShaperRef.current) driveWaveShaperRef.current.curve = makeDistortionCurve(params.drive.gain * 0.5);
+    if (driveWaveShaperRef.current) driveWaveShaperRef.current.curve = makeDistortionCurve(params.drive.gain * 0.5) as any;
     if (driveToneRef.current) driveToneRef.current.frequency.value = 3000 + params.drive.tone * 5000;
 
     // Distortion
