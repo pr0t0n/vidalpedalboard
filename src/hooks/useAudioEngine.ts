@@ -363,22 +363,63 @@ export function useAudioEngine() {
       const perm = await checkPermission();
       if (perm === 'denied') throw new Error('Acesso ao microfone negado. Habilite nas configurações do navegador.');
 
+      // Enumerate devices to pick lowest-latency output
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
+      console.log('Available audio outputs:', audioOutputs.map(d => `${d.label} (${d.deviceId})`));
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: 1,
+          // Request lowest possible latency from the input device
+          latency: { ideal: 0, max: 0.01 },
+        },
       });
       streamRef.current = stream;
+
+      // Log actual track constraints applied
+      const trackSettings = stream.getAudioTracks()[0]?.getSettings();
+      console.log('Audio track settings:', JSON.stringify(trackSettings));
 
       const ctx = new AudioContext({ latencyHint: 0 });
       if (ctx.state === 'suspended') await ctx.resume();
 
-      console.log(`AudioContext: sr=${ctx.sampleRate} baseLatency=${ctx.baseLatency}s outputLatency=${(ctx as any).outputLatency || 'N/A'}s bufferSize=${128}`);
+      const baseLatency = ctx.baseLatency || 0;
+      const outputLatency = (ctx as any).outputLatency || 0;
+      const totalReported = baseLatency + outputLatency;
+      console.log(`🎸 AudioContext Diagnostics:
+  sampleRate: ${ctx.sampleRate}Hz
+  baseLatency: ${(baseLatency * 1000).toFixed(1)}ms
+  outputLatency: ${(outputLatency * 1000).toFixed(1)}ms
+  total reported: ${(totalReported * 1000).toFixed(1)}ms
+  renderQuantum: ${(128 / ctx.sampleRate * 1000).toFixed(2)}ms`);
 
       ctxRef.current = ctx;
       sourceRef.current = ctx.createMediaStreamSource(stream);
       masterGainRef.current = ctx.createGain();
       masterGainRef.current.gain.value = params.volume;
 
-      buildEffectsChain();
+      // === DIRECT PASSTHROUGH TEST ===
+      // Temporarily connect source -> master -> destination with ZERO effects
+      // to measure baseline device latency. If this still has delay, it's the hardware/driver.
+      sourceRef.current.connect(masterGainRef.current);
+      masterGainRef.current.connect(ctx.destination);
+      console.log('🔊 DIRECT PASSTHROUGH MODE — zero effects. If delay persists, it is hardware/driver latency.');
+
+      // After 3s, switch to full effects chain
+      setTimeout(() => {
+        if (!ctxRef.current || !sourceRef.current || !masterGainRef.current) return;
+        try {
+          sourceRef.current.disconnect();
+          masterGainRef.current.disconnect();
+        } catch {}
+        buildEffectsChain();
+        console.log('🎛️ Effects chain connected after passthrough test.');
+      }, 3000);
+
       setIsConnected(true);
       startMeter();
       perfIntervalRef.current = window.setInterval(() => {
@@ -386,11 +427,13 @@ export function useAudioEngine() {
         if ((performance as any).memory) {
           stats.memory = Math.round(((performance as any).memory.usedJSHeapSize / (performance as any).memory.jsHeapSizeLimit) * 100);
         }
-        if (ctxRef.current) stats.latency = Math.round((ctxRef.current.baseLatency || 0) * 1000);
+        if (ctxRef.current) {
+          stats.latency = Math.round(((ctxRef.current.baseLatency || 0) + ((ctxRef.current as any).outputLatency || 0)) * 1000);
+        }
         setPerformanceStats(stats);
       }, 3000);
 
-      console.log('Audio engine connected — NATIVE Web Audio, zero Tuna.js');
+      console.log('Audio engine connected — NATIVE Web Audio, zero overhead');
     } catch (err: any) {
       console.error('Audio connection error:', err);
       let msg = 'Erro ao conectar áudio.';
