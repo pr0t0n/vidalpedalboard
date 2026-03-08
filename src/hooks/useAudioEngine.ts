@@ -379,15 +379,33 @@ export function useAudioEngine() {
       const perm = await checkPermission();
       if (perm === 'denied') throw new Error('Acesso ao microfone negado. Habilite nas configurações do navegador.');
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
-      });
+      const audioConstraints: MediaTrackConstraints & Record<string, unknown> = {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        channelCount: 1,
+        latency: 0,
+        sampleRate: 48000,
+        sampleSize: 16,
+        // Chromium-specific flags to force raw/low-latency capture when available
+        googEchoCancellation: false,
+        googAutoGainControl: false,
+        googNoiseSuppression: false,
+        googHighpassFilter: false,
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
       streamRef.current = stream;
 
-      const ctx = new AudioContext({ sampleRate: 44100, latencyHint: 'interactive' });
+      const trackSettings = stream.getAudioTracks()[0]?.getSettings();
+      const targetSampleRate = typeof trackSettings?.sampleRate === 'number' && trackSettings.sampleRate > 0
+        ? trackSettings.sampleRate
+        : 48000;
+
+      const ctx = new AudioContext({ sampleRate: targetSampleRate, latencyHint: 'interactive' });
       if (ctx.state === 'suspended') await ctx.resume();
 
-      console.log(`AudioContext: sr=${ctx.sampleRate} baseLatency=${ctx.baseLatency}s outputLatency=${(ctx as any).outputLatency || 'N/A'}s bufferSize=${128}`);
+      console.log(`AudioContext: sr=${ctx.sampleRate} baseLatency=${ctx.baseLatency}s outputLatency=${(ctx as any).outputLatency || 'N/A'}s`);
 
       ctxRef.current = ctx;
       sourceRef.current = ctx.createMediaStreamSource(stream);
