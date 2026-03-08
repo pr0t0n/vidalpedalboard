@@ -213,8 +213,7 @@ export function useAudioEngine() {
     analyserRef.current.smoothingTimeConstant = 0;
     source.connect(analyserRef.current);
 
-    // Stereo merger
-    mergerRef.current = ctx.createChannelMerger(2);
+    // Direct connection — no stereo merger overhead
 
     // ===== 1. COMPRESSOR (native DynamicsCompressorNode) =====
     const comp = createBypassable(ctx, (inp, out) => {
