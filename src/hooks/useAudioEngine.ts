@@ -38,11 +38,11 @@ export interface PerformanceStats {
 }
 
 // ===== DISTORTION CURVE (cached) =====
-const curveCache = new Map<number, Float32Array>();
-function makeDistortionCurve(amount: number): Float32Array {
+const curveCache = new Map<number, Float32Array<ArrayBuffer>>();
+function makeDistortionCurve(amount: number): Float32Array<ArrayBuffer> {
   const key = Math.round(amount * 100);
   if (curveCache.has(key)) return curveCache.get(key)!;
-  const samples = 2048;
+  const samples = 8192;
   const buf = new ArrayBuffer(samples * 4);
   const curve = new Float32Array(buf);
   const deg = Math.PI / 180;
@@ -78,23 +78,12 @@ function createBypassable(ctx: AudioContext, buildWetChain: (input: GainNode, ou
   // Wet path — caller connects nodes between wetInput and wetOutput
   const wetInput = ctx.createGain();
   const wetOutput = ctx.createGain();
+  input.connect(wetInput);
   wetOutput.connect(wetGain).connect(output);
 
   buildWetChain(wetInput, wetOutput);
 
-  let wetPathConnected = false;
-  const connectWetPath = () => {
-    if (wetPathConnected) return;
-    input.connect(wetInput);
-    wetPathConnected = true;
-  };
-  const disconnectWetPath = () => {
-    if (!wetPathConnected) return;
-    input.disconnect(wetInput);
-    wetPathConnected = false;
-  };
-
-  // Start bypassed with wet path physically disconnected to save CPU
+  // Start bypassed
   dryGain.gain.value = 1;
   wetGain.gain.value = 0;
 
@@ -102,15 +91,8 @@ function createBypassable(ctx: AudioContext, buildWetChain: (input: GainNode, ou
     input, output, wetGain, dryGain,
     setBypass(bypassed: boolean) {
       const t = ctx.currentTime;
-      if (bypassed) {
-        disconnectWetPath();
-        dryGain.gain.setTargetAtTime(1, t, 0.003);
-        wetGain.gain.setTargetAtTime(0, t, 0.003);
-      } else {
-        connectWetPath();
-        dryGain.gain.setTargetAtTime(0, t, 0.003);
-        wetGain.gain.setTargetAtTime(1, t, 0.003);
-      }
+      dryGain.gain.setTargetAtTime(bypassed ? 1 : 0, t, 0.005);
+      wetGain.gain.setTargetAtTime(bypassed ? 0 : 1, t, 0.005);
     },
   };
 }
@@ -171,8 +153,7 @@ export function useAudioEngine() {
   const streamRef = useRef<MediaStream | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const stereoMergerRef = useRef<ChannelMergerNode | null>(null);
-  const stereoRightDelayRef = useRef<DelayNode | null>(null);
+  const mergerRef = useRef<ChannelMergerNode | null>(null);
 
   // Native effect node refs for live param updates
   const compressorNodeRef = useRef<DynamicsCompressorNode | null>(null);
@@ -233,7 +214,8 @@ export function useAudioEngine() {
     analyserRef.current.smoothingTimeConstant = 0;
     source.connect(analyserRef.current);
 
-    // Direct connection — no stereo merger overhead
+    // Stereo merger
+    mergerRef.current = ctx.createChannelMerger(2);
 
     // ===== 1. COMPRESSOR (native DynamicsCompressorNode) =====
     const comp = createBypassable(ctx, (inp, out) => {
@@ -251,7 +233,7 @@ export function useAudioEngine() {
     // ===== 2. DRIVE (WaveShaper + tone filter) =====
     const drive = createBypassable(ctx, (inp, out) => {
       const ws = ctx.createWaveShaper();
-      ws.curve = makeDistortionCurve(params.drive.gain * 0.5) as any;
+      ws.curve = makeDistortionCurve(params.drive.gain * 0.5);
       ws.oversample = 'none';
       driveWaveShaperRef.current = ws;
       const tone = ctx.createBiquadFilter();
@@ -267,7 +249,7 @@ export function useAudioEngine() {
       const preGain = ctx.createGain();
       preGain.gain.value = 4;
       const ws = ctx.createWaveShaper();
-      ws.curve = makeDistortionCurve(params.distortion.gain) as any;
+      ws.curve = makeDistortionCurve(params.distortion.gain);
       ws.oversample = 'none'; // zero additional latency
       distWaveShaperRef.current = ws;
       const tone = ctx.createBiquadFilter();
@@ -371,18 +353,9 @@ export function useAudioEngine() {
       prev = fx.output;
     }
     prev.connect(master);
-
-    // Stereo output stage (very short Haas delay on right channel)
-    const merger = ctx.createChannelMerger(2);
-    const rightDelay = ctx.createDelay(0.01);
-    rightDelay.delayTime.value = 0.0012;
-    stereoMergerRef.current = merger;
-    stereoRightDelayRef.current = rightDelay;
-
-    master.connect(merger, 0, 0);
-    master.connect(rightDelay);
-    rightDelay.connect(merger, 0, 1);
-    merger.connect(ctx.destination);
+    master.connect(mergerRef.current!, 0, 0);
+    master.connect(mergerRef.current!, 0, 1);
+    mergerRef.current!.connect(ctx.destination);
 
     console.log('Native effects chain connected — zero Tuna overhead');
   }, [params, pedalState]);
@@ -395,22 +368,14 @@ export function useAudioEngine() {
       if (perm === 'denied') throw new Error('Acesso ao microfone negado. Habilite nas configurações do navegador.');
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-          channelCount: 1,
-        } as MediaTrackConstraints,
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
       });
       streamRef.current = stream;
 
-      const ctx = new AudioContext({ latencyHint: 0 });
+      const ctx = new AudioContext({ sampleRate: 44100, latencyHint: 'interactive' });
       if (ctx.state === 'suspended') await ctx.resume();
 
-      const baseLatency = ctx.baseLatency || 0;
-      const outputLatency = (ctx as any).outputLatency || 0;
-      const totalReported = baseLatency + outputLatency;
-      console.log(`🎸 AudioContext: sr=${ctx.sampleRate}Hz base=${(baseLatency * 1000).toFixed(1)}ms out=${(outputLatency * 1000).toFixed(1)}ms total=${(totalReported * 1000).toFixed(1)}ms`);
+      console.log(`AudioContext: sr=${ctx.sampleRate} baseLatency=${ctx.baseLatency}s outputLatency=${(ctx as any).outputLatency || 'N/A'}s bufferSize=${128}`);
 
       ctxRef.current = ctx;
       sourceRef.current = ctx.createMediaStreamSource(stream);
@@ -418,7 +383,6 @@ export function useAudioEngine() {
       masterGainRef.current.gain.value = params.volume;
 
       buildEffectsChain();
-
       setIsConnected(true);
       startMeter();
       perfIntervalRef.current = window.setInterval(() => {
@@ -426,13 +390,11 @@ export function useAudioEngine() {
         if ((performance as any).memory) {
           stats.memory = Math.round(((performance as any).memory.usedJSHeapSize / (performance as any).memory.jsHeapSizeLimit) * 100);
         }
-        if (ctxRef.current) {
-          stats.latency = Math.round(((ctxRef.current.baseLatency || 0) + ((ctxRef.current as any).outputLatency || 0)) * 1000);
-        }
+        if (ctxRef.current) stats.latency = Math.round((ctxRef.current.baseLatency || 0) * 1000);
         setPerformanceStats(stats);
       }, 3000);
 
-      console.log('Audio engine connected — low-latency mode active');
+      console.log('Audio engine connected — NATIVE Web Audio, zero Tuna.js');
     } catch (err: any) {
       console.error('Audio connection error:', err);
       let msg = 'Erro ao conectar áudio.';
@@ -459,7 +421,7 @@ export function useAudioEngine() {
     sourceRef.current = null;
     masterGainRef.current = null;
     analyserRef.current = null;
-    
+    mergerRef.current = null;
     compressorNodeRef.current = null;
     driveWaveShaperRef.current = null;
     driveToneRef.current = null;
@@ -474,8 +436,6 @@ export function useAudioEngine() {
     delayNodeRef.current = null;
     delayFbRef.current = null;
     wahFilterRef.current = null;
-    stereoMergerRef.current = null;
-    stereoRightDelayRef.current = null;
     reverbDecayGains.current = [];
     effectsMap.current = {};
     setIsConnected(false);
@@ -520,11 +480,11 @@ export function useAudioEngine() {
     }
 
     // Drive
-    if (driveWaveShaperRef.current) driveWaveShaperRef.current.curve = makeDistortionCurve(params.drive.gain * 0.5) as any;
+    if (driveWaveShaperRef.current) driveWaveShaperRef.current.curve = makeDistortionCurve(params.drive.gain * 0.5);
     if (driveToneRef.current) driveToneRef.current.frequency.value = 3000 + params.drive.tone * 5000;
 
     // Distortion
-    if (distWaveShaperRef.current) distWaveShaperRef.current.curve = makeDistortionCurve(params.distortion.gain) as any;
+    if (distWaveShaperRef.current) distWaveShaperRef.current.curve = makeDistortionCurve(params.distortion.gain);
     if (distToneRef.current) distToneRef.current.frequency.value = 2000 + params.distortion.tone * 6000;
 
     // Chorus

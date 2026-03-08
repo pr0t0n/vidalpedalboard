@@ -34,29 +34,18 @@ export function useAuth() {
       return { profile: profile as UserProfile | null, isAdmin };
     };
 
-    // Fallback: evita tela travada em loading infinito (Safari/iPad/incógnito)
-    const loadingTimeout = window.setTimeout(() => {
-      if (!isMounted) return;
-      setState((prev) => (prev.isLoading ? { ...prev, isLoading: false } : prev));
-    }, 4000);
-
     // Listener for ONGOING auth changes (does NOT control isLoading)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
         if (!isMounted) return;
 
         if (session?.user) {
-          fetchUserData(session.user.id)
-            .then(({ profile, isAdmin }) => {
-              if (isMounted) {
-                setState({ user: session.user, profile, isAdmin, isLoading: false });
-              }
-            })
-            .catch(() => {
-              if (isMounted) {
-                setState({ user: session.user, profile: null, isAdmin: false, isLoading: false });
-              }
-            });
+          // Fire and forget - don't set loading
+          fetchUserData(session.user.id).then(({ profile, isAdmin }) => {
+            if (isMounted) {
+              setState({ user: session.user, profile, isAdmin, isLoading: false });
+            }
+          });
         } else {
           setState({ user: null, profile: null, isAdmin: false, isLoading: false });
         }
@@ -90,7 +79,6 @@ export function useAuth() {
 
     return () => {
       isMounted = false;
-      clearTimeout(loadingTimeout);
       subscription.unsubscribe();
     };
   }, []);
