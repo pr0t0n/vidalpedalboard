@@ -59,16 +59,24 @@ const Index = () => {
     saveOrder(newOrder);
   }, [pedalOrder, saveOrder]);
 
-  // Save preset handler
-  const handleSavePreset = async () => {
+  // Save preset handler (local storage)
+  const handleSavePreset = () => {
     if (!newPresetName.trim()) return;
-    await savePreset(newPresetName.trim(), pedalState, params, {});
+    const newPreset = {
+      id: Date.now().toString(),
+      name: newPresetName.trim(),
+      is_active: false,
+      pedal_states: { ...pedalState },
+      pedal_params: { ...params },
+    };
+    const updated = [...presets, newPreset];
+    setPresets(updated);
+    try { localStorage.setItem('presets', JSON.stringify(updated)); } catch {}
     setNewPresetName('');
   };
 
   // Load preset handler
-  const handleLoadPreset = async (preset: any) => {
-    await activatePreset(preset.id);
+  const handleLoadPreset = (preset: any) => {
     if (preset.pedal_states) {
       Object.entries(preset.pedal_states).forEach(([key, value]) => {
         if (value !== pedalState[key as keyof typeof pedalState]) {
@@ -91,6 +99,25 @@ const Index = () => {
     }
     setShowPresets(false);
   };
+
+  const deletePreset = (id: string) => {
+    const updated = presets.filter(p => p.id !== id);
+    setPresets(updated);
+    try { localStorage.setItem('presets', JSON.stringify(updated)); } catch {};
+  };
+
+  // Load presets & order from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('presets');
+      if (saved) setPresets(JSON.parse(saved));
+      const savedOrder = localStorage.getItem('pedalOrder');
+      if (savedOrder) {
+        const parsed = JSON.parse(savedOrder);
+        if (Array.isArray(parsed) && parsed.length > 0) setPedalOrder(parsed);
+      }
+    } catch {}
+  }, []);
 
   // Render a pedal by its ID
   const renderPedal = (pedalId: string, index: number) => {
