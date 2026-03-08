@@ -265,7 +265,7 @@ export function useAudioEngine() {
       const preGain = ctx.createGain();
       preGain.gain.value = 4;
       const ws = ctx.createWaveShaper();
-      ws.curve = makeDistortionCurve(params.distortion.gain);
+      ws.curve = makeDistortionCurve(params.distortion.gain) as any;
       ws.oversample = 'none'; // zero additional latency
       distWaveShaperRef.current = ws;
       const tone = ctx.createBiquadFilter();
