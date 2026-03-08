@@ -42,7 +42,7 @@ const curveCache = new Map<number, Float32Array<ArrayBuffer>>();
 function makeDistortionCurve(amount: number): Float32Array<ArrayBuffer> {
   const key = Math.round(amount * 100);
   if (curveCache.has(key)) return curveCache.get(key)!;
-  const samples = 8192;
+  const samples = 2048;
   const buf = new ArrayBuffer(samples * 4);
   const curve = new Float32Array(buf);
   const deg = Math.PI / 180;
@@ -78,12 +78,23 @@ function createBypassable(ctx: AudioContext, buildWetChain: (input: GainNode, ou
   // Wet path — caller connects nodes between wetInput and wetOutput
   const wetInput = ctx.createGain();
   const wetOutput = ctx.createGain();
-  input.connect(wetInput);
   wetOutput.connect(wetGain).connect(output);
 
   buildWetChain(wetInput, wetOutput);
 
-  // Start bypassed
+  let wetPathConnected = false;
+  const connectWetPath = () => {
+    if (wetPathConnected) return;
+    input.connect(wetInput);
+    wetPathConnected = true;
+  };
+  const disconnectWetPath = () => {
+    if (!wetPathConnected) return;
+    input.disconnect(wetInput);
+    wetPathConnected = false;
+  };
+
+  // Start bypassed with wet path physically disconnected to save CPU
   dryGain.gain.value = 1;
   wetGain.gain.value = 0;
 
@@ -91,8 +102,15 @@ function createBypassable(ctx: AudioContext, buildWetChain: (input: GainNode, ou
     input, output, wetGain, dryGain,
     setBypass(bypassed: boolean) {
       const t = ctx.currentTime;
-      dryGain.gain.setTargetAtTime(bypassed ? 1 : 0, t, 0.005);
-      wetGain.gain.setTargetAtTime(bypassed ? 0 : 1, t, 0.005);
+      if (bypassed) {
+        disconnectWetPath();
+        dryGain.gain.setTargetAtTime(1, t, 0.003);
+        wetGain.gain.setTargetAtTime(0, t, 0.003);
+      } else {
+        connectWetPath();
+        dryGain.gain.setTargetAtTime(0, t, 0.003);
+        wetGain.gain.setTargetAtTime(1, t, 0.003);
+      }
     },
   };
 }
@@ -363,11 +381,6 @@ export function useAudioEngine() {
       const perm = await checkPermission();
       if (perm === 'denied') throw new Error('Acesso ao microfone negado. Habilite nas configurações do navegador.');
 
-      // Enumerate devices to pick lowest-latency output
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
-      console.log('Available audio outputs:', audioOutputs.map(d => `${d.label} (${d.deviceId})`));
-
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: false,
@@ -378,45 +391,20 @@ export function useAudioEngine() {
       });
       streamRef.current = stream;
 
-      // Log actual track constraints applied
-      const trackSettings = stream.getAudioTracks()[0]?.getSettings();
-      console.log('Audio track settings:', JSON.stringify(trackSettings));
-
-      const ctx = new AudioContext({ latencyHint: 0 });
+      const ctx = new AudioContext({ latencyHint: 'interactive' });
       if (ctx.state === 'suspended') await ctx.resume();
 
       const baseLatency = ctx.baseLatency || 0;
       const outputLatency = (ctx as any).outputLatency || 0;
       const totalReported = baseLatency + outputLatency;
-      console.log(`🎸 AudioContext Diagnostics:
-  sampleRate: ${ctx.sampleRate}Hz
-  baseLatency: ${(baseLatency * 1000).toFixed(1)}ms
-  outputLatency: ${(outputLatency * 1000).toFixed(1)}ms
-  total reported: ${(totalReported * 1000).toFixed(1)}ms
-  renderQuantum: ${(128 / ctx.sampleRate * 1000).toFixed(2)}ms`);
+      console.log(`🎸 AudioContext: sr=${ctx.sampleRate}Hz base=${(baseLatency * 1000).toFixed(1)}ms out=${(outputLatency * 1000).toFixed(1)}ms total=${(totalReported * 1000).toFixed(1)}ms`);
 
       ctxRef.current = ctx;
       sourceRef.current = ctx.createMediaStreamSource(stream);
       masterGainRef.current = ctx.createGain();
       masterGainRef.current.gain.value = params.volume;
 
-      // === DIRECT PASSTHROUGH TEST ===
-      // Temporarily connect source -> master -> destination with ZERO effects
-      // to measure baseline device latency. If this still has delay, it's the hardware/driver.
-      sourceRef.current.connect(masterGainRef.current);
-      masterGainRef.current.connect(ctx.destination);
-      console.log('🔊 DIRECT PASSTHROUGH MODE — zero effects. If delay persists, it is hardware/driver latency.');
-
-      // After 3s, switch to full effects chain
-      setTimeout(() => {
-        if (!ctxRef.current || !sourceRef.current || !masterGainRef.current) return;
-        try {
-          sourceRef.current.disconnect();
-          masterGainRef.current.disconnect();
-        } catch {}
-        buildEffectsChain();
-        console.log('🎛️ Effects chain connected after passthrough test.');
-      }, 3000);
+      buildEffectsChain();
 
       setIsConnected(true);
       startMeter();
@@ -431,7 +419,7 @@ export function useAudioEngine() {
         setPerformanceStats(stats);
       }, 3000);
 
-      console.log('Audio engine connected — NATIVE Web Audio, zero overhead');
+      console.log('Audio engine connected — low-latency mode active');
     } catch (err: any) {
       console.error('Audio connection error:', err);
       let msg = 'Erro ao conectar áudio.';
