@@ -44,16 +44,11 @@ const Index = () => {
     }
   }, [isConnected, wakeLockActive, requestWakeLock]);
 
-  // Save order to DB
-  const saveOrder = useCallback(async (newOrder: string[]) => {
+  // Save order locally
+  const saveOrder = useCallback((newOrder: string[]) => {
     setPedalOrder(newOrder);
-    if (user) {
-      await supabase
-        .from('profiles')
-        .update({ pedal_order: newOrder as any })
-        .eq('user_id', user.id);
-    }
-  }, [user]);
+    try { localStorage.setItem('pedalOrder', JSON.stringify(newOrder)); } catch {}
+  }, []);
 
   // Move pedal left/right
   const movePedal = useCallback((index: number, direction: -1 | 1) => {
