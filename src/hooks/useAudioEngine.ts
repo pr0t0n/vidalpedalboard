@@ -509,7 +509,7 @@ export function useAudioEngine() {
     if (driveToneRef.current) driveToneRef.current.frequency.value = 3000 + params.drive.tone * 5000;
 
     // Distortion
-    if (distWaveShaperRef.current) distWaveShaperRef.current.curve = makeDistortionCurve(params.distortion.gain);
+    if (distWaveShaperRef.current) distWaveShaperRef.current.curve = makeDistortionCurve(params.distortion.gain) as any;
     if (distToneRef.current) distToneRef.current.frequency.value = 2000 + params.distortion.tone * 6000;
 
     // Chorus
