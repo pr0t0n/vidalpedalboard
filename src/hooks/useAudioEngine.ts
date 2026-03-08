@@ -369,7 +369,7 @@ export function useAudioEngine() {
       });
       streamRef.current = stream;
 
-      const ctx = new AudioContext({ sampleRate: 44100, latencyHint: 'interactive' });
+      const ctx = new AudioContext({ latencyHint: 0 });
       if (ctx.state === 'suspended') await ctx.resume();
 
       console.log(`AudioContext: sr=${ctx.sampleRate} baseLatency=${ctx.baseLatency}s outputLatency=${(ctx as any).outputLatency || 'N/A'}s bufferSize=${128}`);
