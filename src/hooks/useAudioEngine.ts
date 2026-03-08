@@ -171,6 +171,8 @@ export function useAudioEngine() {
   const streamRef = useRef<MediaStream | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const stereoMergerRef = useRef<ChannelMergerNode | null>(null);
+  const stereoRightDelayRef = useRef<DelayNode | null>(null);
 
   // Native effect node refs for live param updates
   const compressorNodeRef = useRef<DynamicsCompressorNode | null>(null);
@@ -369,7 +371,18 @@ export function useAudioEngine() {
       prev = fx.output;
     }
     prev.connect(master);
-    master.connect(ctx.destination);
+
+    // Stereo output stage (very short Haas delay on right channel)
+    const merger = ctx.createChannelMerger(2);
+    const rightDelay = ctx.createDelay(0.01);
+    rightDelay.delayTime.value = 0.0012;
+    stereoMergerRef.current = merger;
+    stereoRightDelayRef.current = rightDelay;
+
+    master.connect(merger, 0, 0);
+    master.connect(rightDelay);
+    rightDelay.connect(merger, 0, 1);
+    merger.connect(ctx.destination);
 
     console.log('Native effects chain connected — zero Tuna overhead');
   }, [params, pedalState]);
@@ -391,7 +404,7 @@ export function useAudioEngine() {
       });
       streamRef.current = stream;
 
-      const ctx = new AudioContext({ latencyHint: 'interactive' });
+      const ctx = new AudioContext({ latencyHint: 0 });
       if (ctx.state === 'suspended') await ctx.resume();
 
       const baseLatency = ctx.baseLatency || 0;
@@ -461,6 +474,8 @@ export function useAudioEngine() {
     delayNodeRef.current = null;
     delayFbRef.current = null;
     wahFilterRef.current = null;
+    stereoMergerRef.current = null;
+    stereoRightDelayRef.current = null;
     reverbDecayGains.current = [];
     effectsMap.current = {};
     setIsConnected(false);
