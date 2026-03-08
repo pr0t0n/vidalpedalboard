@@ -71,28 +71,40 @@ function createBypassable(ctx: AudioContext, buildWetChain: (input: GainNode, ou
   const output = ctx.createGain();
   const dryGain = ctx.createGain();
   const wetGain = ctx.createGain();
-
-  // Dry path
-  input.connect(dryGain).connect(output);
-
-  // Wet path — caller connects nodes between wetInput and wetOutput
   const wetInput = ctx.createGain();
   const wetOutput = ctx.createGain();
-  input.connect(wetInput);
+
+  // Dry path is always connected
+  input.connect(dryGain).connect(output);
   wetOutput.connect(wetGain).connect(output);
 
+  // Build wet chain, but only connect input->wet when effect is ON
   buildWetChain(wetInput, wetOutput);
 
-  // Start bypassed
+  let wetConnected = false;
+
+  // Start bypassed (hard bypass: wet path physically disconnected)
   dryGain.gain.value = 1;
   wetGain.gain.value = 0;
 
   return {
-    input, output, wetGain, dryGain,
+    input,
+    output,
+    wetGain,
+    dryGain,
     setBypass(bypassed: boolean) {
       const t = ctx.currentTime;
-      dryGain.gain.setTargetAtTime(bypassed ? 1 : 0, t, 0.005);
-      wetGain.gain.setTargetAtTime(bypassed ? 0 : 1, t, 0.005);
+
+      if (bypassed && wetConnected) {
+        input.disconnect(wetInput);
+        wetConnected = false;
+      } else if (!bypassed && !wetConnected) {
+        input.connect(wetInput);
+        wetConnected = true;
+      }
+
+      dryGain.gain.setTargetAtTime(bypassed ? 1 : 0, t, 0.003);
+      wetGain.gain.setTargetAtTime(bypassed ? 0 : 1, t, 0.003);
     },
   };
 }
