@@ -418,7 +418,7 @@ export function useAudioEngine() {
     sourceRef.current = null;
     masterGainRef.current = null;
     analyserRef.current = null;
-    mergerRef.current = null;
+    
     compressorNodeRef.current = null;
     driveWaveShaperRef.current = null;
     driveToneRef.current = null;
