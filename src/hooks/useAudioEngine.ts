@@ -42,7 +42,7 @@ const curveCache = new Map<number, Float32Array<ArrayBuffer>>();
 function makeDistortionCurve(amount: number): Float32Array<ArrayBuffer> {
   const key = Math.round(amount * 100);
   if (curveCache.has(key)) return curveCache.get(key)!;
-  const samples = 8192;
+  const samples = 2048;
   const buf = new ArrayBuffer(samples * 4);
   const curve = new Float32Array(buf);
   const deg = Math.PI / 180;
