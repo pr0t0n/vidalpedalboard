@@ -374,9 +374,7 @@ export function useAudioEngine() {
           noiseSuppression: false,
           autoGainControl: false,
           channelCount: 1,
-          // Request lowest possible latency from the input device
-          latency: { ideal: 0, max: 0.01 },
-        },
+        } as MediaTrackConstraints,
       });
       streamRef.current = stream;
 
