@@ -404,7 +404,7 @@ export function useAudioEngine() {
       });
       streamRef.current = stream;
 
-      const ctx = new AudioContext({ latencyHint: 'interactive' });
+      const ctx = new AudioContext({ latencyHint: 0 });
       if (ctx.state === 'suspended') await ctx.resume();
 
       const baseLatency = ctx.baseLatency || 0;
