@@ -38,8 +38,8 @@ export interface PerformanceStats {
 }
 
 // ===== DISTORTION CURVE (cached) =====
-const curveCache = new Map<number, Float32Array<ArrayBuffer>>();
-function makeDistortionCurve(amount: number): Float32Array<ArrayBuffer> {
+const curveCache = new Map<number, Float32Array>();
+function makeDistortionCurve(amount: number): Float32Array {
   const key = Math.round(amount * 100);
   if (curveCache.has(key)) return curveCache.get(key)!;
   const samples = 2048;
