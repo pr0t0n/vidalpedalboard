@@ -22,43 +22,20 @@ const DEFAULT_ORDER = [
   'compressor', 'drive', 'distortion', 'chorus', 'tremolo', 'wah', 'delay', 'reverb'
 ];
 
-const Index = ({ onSignOut, isAdmin }: IndexProps) => {
-  const { user, profile } = useAuth();
+const Index = () => {
   const {
     isConnected, isLoading, error, inputLevel,
     pedalState, params, connect, disconnect,
     togglePedal, updateParam, setVolume,
   } = useAudioEngine();
 
-  const { presets, savePreset, activatePreset, deletePreset } = usePresets(user?.id);
   const { isActive: wakeLockActive, request: requestWakeLock } = useWakeLock();
 
   const [showPresets, setShowPresets] = useState(false);
   const [newPresetName, setNewPresetName] = useState('');
   const [pedalOrder, setPedalOrder] = useState<string[]>(DEFAULT_ORDER);
   const [editingOrder, setEditingOrder] = useState(false);
-
-  // Load pedal order from profile
-  useEffect(() => {
-    if (profile) {
-      const loadOrder = async () => {
-        const { data } = await supabase
-          .from('profiles')
-          .select('pedal_order')
-          .eq('user_id', profile.user_id)
-          .maybeSingle();
-        if (data?.pedal_order && Array.isArray(data.pedal_order) && data.pedal_order.length > 0) {
-          // Filter to only keep builtin pedal IDs
-          const builtinSet = new Set(DEFAULT_ORDER);
-          const filtered = (data.pedal_order as string[]).filter(id => builtinSet.has(id));
-          // Add any missing builtin pedals at the end
-          const missing = DEFAULT_ORDER.filter(id => !filtered.includes(id));
-          setPedalOrder([...filtered, ...missing]);
-        }
-      };
-      loadOrder();
-    }
-  }, [profile]);
+  const [presets, setPresets] = useState<Array<{ id: string; name: string; is_active: boolean; pedal_states: any; pedal_params: any }>>([]);
 
   // Request wake lock on connect
   useEffect(() => {
