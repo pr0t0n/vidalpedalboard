@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAudioEngine } from '@/hooks/useAudioEngine';
-import { useAuth } from '@/hooks/useAuth';
-import { usePresets } from '@/hooks/usePresets';
 import { useWakeLock } from '@/hooks/useWakeLock';
 import { CompressorPedal } from '@/components/pedals/CompressorPedal';
 import { DrivePedal } from '@/components/pedals/DrivePedal';
@@ -14,59 +12,30 @@ import { WahPedal } from '@/components/pedals/WahPedal';
 import { ReverbPedal } from '@/components/pedals/ReverbPedal';
 
 import { VidalLogo } from '@/components/VidalLogo';
-import { supabase } from '@/integrations/supabase/client';
 import {
-  AlertCircle, Mic, MicOff, Volume2, Settings, LogOut, Shield,
+  AlertCircle, Mic, MicOff, Volume2, Settings,
   Save, FolderOpen, Trash2, ChevronLeft, ChevronRight, ArrowLeftRight
 } from 'lucide-react';
-
-interface IndexProps {
-  onSignOut: () => void;
-  isAdmin: boolean;
-}
 
 // Optimal signal chain order for default
 const DEFAULT_ORDER = [
   'compressor', 'drive', 'distortion', 'chorus', 'tremolo', 'wah', 'delay', 'reverb'
 ];
 
-const Index = ({ onSignOut, isAdmin }: IndexProps) => {
-  const { user, profile } = useAuth();
+const Index = () => {
   const {
     isConnected, isLoading, error, inputLevel,
     pedalState, params, connect, disconnect,
     togglePedal, updateParam, setVolume,
   } = useAudioEngine();
 
-  const { presets, savePreset, activatePreset, deletePreset } = usePresets(user?.id);
   const { isActive: wakeLockActive, request: requestWakeLock } = useWakeLock();
 
   const [showPresets, setShowPresets] = useState(false);
   const [newPresetName, setNewPresetName] = useState('');
   const [pedalOrder, setPedalOrder] = useState<string[]>(DEFAULT_ORDER);
   const [editingOrder, setEditingOrder] = useState(false);
-
-  // Load pedal order from profile
-  useEffect(() => {
-    if (profile) {
-      const loadOrder = async () => {
-        const { data } = await supabase
-          .from('profiles')
-          .select('pedal_order')
-          .eq('user_id', profile.user_id)
-          .maybeSingle();
-        if (data?.pedal_order && Array.isArray(data.pedal_order) && data.pedal_order.length > 0) {
-          // Filter to only keep builtin pedal IDs
-          const builtinSet = new Set(DEFAULT_ORDER);
-          const filtered = (data.pedal_order as string[]).filter(id => builtinSet.has(id));
-          // Add any missing builtin pedals at the end
-          const missing = DEFAULT_ORDER.filter(id => !filtered.includes(id));
-          setPedalOrder([...filtered, ...missing]);
-        }
-      };
-      loadOrder();
-    }
-  }, [profile]);
+  const [presets, setPresets] = useState<Array<{ id: string; name: string; is_active: boolean; pedal_states: any; pedal_params: any }>>([]);
 
   // Request wake lock on connect
   useEffect(() => {
@@ -75,16 +44,11 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
     }
   }, [isConnected, wakeLockActive, requestWakeLock]);
 
-  // Save order to DB
-  const saveOrder = useCallback(async (newOrder: string[]) => {
+  // Save order locally
+  const saveOrder = useCallback((newOrder: string[]) => {
     setPedalOrder(newOrder);
-    if (user) {
-      await supabase
-        .from('profiles')
-        .update({ pedal_order: newOrder as any })
-        .eq('user_id', user.id);
-    }
-  }, [user]);
+    try { localStorage.setItem('pedalOrder', JSON.stringify(newOrder)); } catch {}
+  }, []);
 
   // Move pedal left/right
   const movePedal = useCallback((index: number, direction: -1 | 1) => {
@@ -95,16 +59,24 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
     saveOrder(newOrder);
   }, [pedalOrder, saveOrder]);
 
-  // Save preset handler
-  const handleSavePreset = async () => {
+  // Save preset handler (local storage)
+  const handleSavePreset = () => {
     if (!newPresetName.trim()) return;
-    await savePreset(newPresetName.trim(), pedalState, params, {});
+    const newPreset = {
+      id: Date.now().toString(),
+      name: newPresetName.trim(),
+      is_active: false,
+      pedal_states: { ...pedalState },
+      pedal_params: { ...params },
+    };
+    const updated = [...presets, newPreset];
+    setPresets(updated);
+    try { localStorage.setItem('presets', JSON.stringify(updated)); } catch {}
     setNewPresetName('');
   };
 
   // Load preset handler
-  const handleLoadPreset = async (preset: any) => {
-    await activatePreset(preset.id);
+  const handleLoadPreset = (preset: any) => {
     if (preset.pedal_states) {
       Object.entries(preset.pedal_states).forEach(([key, value]) => {
         if (value !== pedalState[key as keyof typeof pedalState]) {
@@ -127,6 +99,25 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
     }
     setShowPresets(false);
   };
+
+  const deletePreset = (id: string) => {
+    const updated = presets.filter(p => p.id !== id);
+    setPresets(updated);
+    try { localStorage.setItem('presets', JSON.stringify(updated)); } catch {};
+  };
+
+  // Load presets & order from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('presets');
+      if (saved) setPresets(JSON.parse(saved));
+      const savedOrder = localStorage.getItem('pedalOrder');
+      if (savedOrder) {
+        const parsed = JSON.parse(savedOrder);
+        if (Array.isArray(parsed) && parsed.length > 0) setPedalOrder(parsed);
+      }
+    } catch {}
+  }, []);
 
   // Render a pedal by its ID
   const renderPedal = (pedalId: string, index: number) => {
@@ -284,15 +275,7 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
               <span className="text-[10px] font-medium hidden sm:inline">Pedais</span>
             </Link>
 
-            {/* Admin */}
-            {isAdmin && (
-              <Link to="/admin" className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors">
-                <Shield className="w-3.5 h-3.5" />
-                <span className="text-[10px] font-medium hidden sm:inline">Admin</span>
-              </Link>
-            )}
-
-            {/* Status & Logout */}
+            {/* Status */}
             <div className="flex items-center gap-2">
               <div
                 className="w-2 h-2 rounded-full"
@@ -301,9 +284,6 @@ const Index = ({ onSignOut, isAdmin }: IndexProps) => {
                   boxShadow: isConnected ? '0 0 6px hsl(142, 70%, 45%)' : 'none',
                 }}
               />
-              <button onClick={onSignOut} className="p-2 rounded-lg hover:bg-muted/80 transition-colors touch-manipulation">
-                <LogOut className="w-3.5 h-3.5 text-muted-foreground" />
-              </button>
             </div>
           </div>
         </div>
