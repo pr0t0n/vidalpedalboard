@@ -474,6 +474,8 @@ export function useAudioEngine() {
     delayNodeRef.current = null;
     delayFbRef.current = null;
     wahFilterRef.current = null;
+    stereoMergerRef.current = null;
+    stereoRightDelayRef.current = null;
     reverbDecayGains.current = [];
     effectsMap.current = {};
     setIsConnected(false);
