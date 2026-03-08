@@ -352,9 +352,7 @@ export function useAudioEngine() {
       prev = fx.output;
     }
     prev.connect(master);
-    master.connect(mergerRef.current!, 0, 0);
-    master.connect(mergerRef.current!, 0, 1);
-    mergerRef.current!.connect(ctx.destination);
+    master.connect(ctx.destination);
 
     console.log('Native effects chain connected — zero Tuna overhead');
   }, [params, pedalState]);
