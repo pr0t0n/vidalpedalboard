@@ -249,7 +249,7 @@ export function useAudioEngine() {
     // ===== 2. DRIVE (WaveShaper + tone filter) =====
     const drive = createBypassable(ctx, (inp, out) => {
       const ws = ctx.createWaveShaper();
-      ws.curve = makeDistortionCurve(params.drive.gain * 0.5);
+      ws.curve = makeDistortionCurve(params.drive.gain * 0.5) as any;
       ws.oversample = 'none';
       driveWaveShaperRef.current = ws;
       const tone = ctx.createBiquadFilter();
