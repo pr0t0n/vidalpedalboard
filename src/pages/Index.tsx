@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAudioEngine } from '@/hooks/useAudioEngine';
-import { useAuth } from '@/hooks/useAuth';
-import { usePresets } from '@/hooks/usePresets';
 import { useWakeLock } from '@/hooks/useWakeLock';
 import { CompressorPedal } from '@/components/pedals/CompressorPedal';
 import { DrivePedal } from '@/components/pedals/DrivePedal';
@@ -14,16 +12,10 @@ import { WahPedal } from '@/components/pedals/WahPedal';
 import { ReverbPedal } from '@/components/pedals/ReverbPedal';
 
 import { VidalLogo } from '@/components/VidalLogo';
-import { supabase } from '@/integrations/supabase/client';
 import {
-  AlertCircle, Mic, MicOff, Volume2, Settings, LogOut, Shield,
+  AlertCircle, Mic, MicOff, Volume2, Settings,
   Save, FolderOpen, Trash2, ChevronLeft, ChevronRight, ArrowLeftRight
 } from 'lucide-react';
-
-interface IndexProps {
-  onSignOut: () => void;
-  isAdmin: boolean;
-}
 
 // Optimal signal chain order for default
 const DEFAULT_ORDER = [
