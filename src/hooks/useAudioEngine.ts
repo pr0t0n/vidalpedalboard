@@ -153,7 +153,6 @@ export function useAudioEngine() {
   const streamRef = useRef<MediaStream | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const mergerRef = useRef<ChannelMergerNode | null>(null);
 
   // Native effect node refs for live param updates
   const compressorNodeRef = useRef<DynamicsCompressorNode | null>(null);
@@ -214,8 +213,7 @@ export function useAudioEngine() {
     analyserRef.current.smoothingTimeConstant = 0;
     source.connect(analyserRef.current);
 
-    // Stereo merger
-    mergerRef.current = ctx.createChannelMerger(2);
+    // Direct connection — no stereo merger overhead
 
     // ===== 1. COMPRESSOR (native DynamicsCompressorNode) =====
     const comp = createBypassable(ctx, (inp, out) => {
@@ -353,9 +351,7 @@ export function useAudioEngine() {
       prev = fx.output;
     }
     prev.connect(master);
-    master.connect(mergerRef.current!, 0, 0);
-    master.connect(mergerRef.current!, 0, 1);
-    mergerRef.current!.connect(ctx.destination);
+    master.connect(ctx.destination);
 
     console.log('Native effects chain connected — zero Tuna overhead');
   }, [params, pedalState]);
@@ -372,7 +368,7 @@ export function useAudioEngine() {
       });
       streamRef.current = stream;
 
-      const ctx = new AudioContext({ sampleRate: 44100, latencyHint: 'interactive' });
+      const ctx = new AudioContext({ latencyHint: 0 });
       if (ctx.state === 'suspended') await ctx.resume();
 
       console.log(`AudioContext: sr=${ctx.sampleRate} baseLatency=${ctx.baseLatency}s outputLatency=${(ctx as any).outputLatency || 'N/A'}s bufferSize=${128}`);
@@ -421,7 +417,7 @@ export function useAudioEngine() {
     sourceRef.current = null;
     masterGainRef.current = null;
     analyserRef.current = null;
-    mergerRef.current = null;
+    
     compressorNodeRef.current = null;
     driveWaveShaperRef.current = null;
     driveToneRef.current = null;
