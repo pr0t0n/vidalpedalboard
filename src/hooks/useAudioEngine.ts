@@ -78,12 +78,23 @@ function createBypassable(ctx: AudioContext, buildWetChain: (input: GainNode, ou
   // Wet path — caller connects nodes between wetInput and wetOutput
   const wetInput = ctx.createGain();
   const wetOutput = ctx.createGain();
-  input.connect(wetInput);
   wetOutput.connect(wetGain).connect(output);
 
   buildWetChain(wetInput, wetOutput);
 
-  // Start bypassed
+  let wetPathConnected = false;
+  const connectWetPath = () => {
+    if (wetPathConnected) return;
+    input.connect(wetInput);
+    wetPathConnected = true;
+  };
+  const disconnectWetPath = () => {
+    if (!wetPathConnected) return;
+    input.disconnect(wetInput);
+    wetPathConnected = false;
+  };
+
+  // Start bypassed with wet path physically disconnected to save CPU
   dryGain.gain.value = 1;
   wetGain.gain.value = 0;
 
@@ -91,8 +102,15 @@ function createBypassable(ctx: AudioContext, buildWetChain: (input: GainNode, ou
     input, output, wetGain, dryGain,
     setBypass(bypassed: boolean) {
       const t = ctx.currentTime;
-      dryGain.gain.setTargetAtTime(bypassed ? 1 : 0, t, 0.005);
-      wetGain.gain.setTargetAtTime(bypassed ? 0 : 1, t, 0.005);
+      if (bypassed) {
+        disconnectWetPath();
+        dryGain.gain.setTargetAtTime(1, t, 0.003);
+        wetGain.gain.setTargetAtTime(0, t, 0.003);
+      } else {
+        connectWetPath();
+        dryGain.gain.setTargetAtTime(0, t, 0.003);
+        wetGain.gain.setTargetAtTime(1, t, 0.003);
+      }
     },
   };
 }
