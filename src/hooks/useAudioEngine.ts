@@ -371,7 +371,18 @@ export function useAudioEngine() {
       prev = fx.output;
     }
     prev.connect(master);
-    master.connect(ctx.destination);
+
+    // Stereo output stage (very short Haas delay on right channel)
+    const merger = ctx.createChannelMerger(2);
+    const rightDelay = ctx.createDelay(0.01);
+    rightDelay.delayTime.value = 0.0012;
+    stereoMergerRef.current = merger;
+    stereoRightDelayRef.current = rightDelay;
+
+    master.connect(merger, 0, 0);
+    master.connect(rightDelay);
+    rightDelay.connect(merger, 0, 1);
+    merger.connect(ctx.destination);
 
     console.log('Native effects chain connected — zero Tuna overhead');
   }, [params, pedalState]);
